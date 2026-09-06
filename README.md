@@ -12,7 +12,10 @@ Starter Node.js + Express.js backend.
 ## API
 
 - `GET /` - welcome response
+- `GET /docs` - Swagger API documentation
 - `GET /api/health` - health check
+- `POST /api/users` - create a user
+- `GET /api/users/:id` - get a user by ID
 
 ## Environment
 
