@@ -98,3 +98,49 @@ without overbuilding a configurable admin-permissions system.
 User role changes still rely on JWT expiry/reissue. Ownership checks are handled
 by shared middleware using trusted persisted ownership data, and cross-owner
 access requires an explicit `:any` permission.
+
+## Decision: Stay on CommonJS JavaScript
+
+**Context:** The service already has working auth, products, and permission-based
+RBAC in CommonJS JavaScript. TypeScript was considered because checkout will
+add more request/response shapes and because the domain is money-critical.
+
+**Options considered:** Migrate the existing codebase to TypeScript now, adopt
+TypeScript only for new modules, or stay on JavaScript for the assignment.
+
+**Choice:** Stay on CommonJS JavaScript. Do not add a compile step.
+
+**Why:** The graded risks are concurrency, idempotency, and integer-cent
+correctness. Those are enforced by PostgreSQL constraints, transactions, and
+tests, not by a type checker. A TypeScript rewrite would spend the timebox on
+auth/products/RBAC that already work. Traffic scalability is also independent
+of JS vs TS.
+
+**Consequences:** Request and row shapes remain implicit. Boundaries must keep
+mapping DB snake_case to API camelCase in repositories, and permission names
+stay in the static catalog. TypeScript can be revisited after checkout and a
+concurrency test exist, if this service outlives the assignment.
+
+## Decision: Carts re-price live and do not reserve inventory
+
+**Context:** A cart can sit between add-item and checkout while product price or
+availability changes. Inventory must never be sold twice, and money must stay
+in integer cents.
+
+**Options considered:** Snapshot price and reserve stock at add-to-cart, or keep
+the cart as a list of product IDs and quantities and resolve price/availability
+later.
+
+**Choice:** A customer may have one open cart. Viewing a cart uses live product
+prices. Adding or updating items rejects inactive products and quantities above
+current inventory, but does not decrement stock. Stock decrements only at
+checkout. Checked-out carts cannot be mutated.
+
+**Why:** Reservation at add-time creates abandoned-cart lockups and extra
+concurrency rules before checkout exists. Live pricing plus checkout-time
+inventory checks keep the cart API simple and push the hard invariants to the
+transaction that actually creates an order.
+
+**Consequences:** A cart total can change between view and checkout. An item
+valid at add-time can fail later if stock drops. Checkout must re-validate
+every line against live inventory and snapshot prices onto the order.

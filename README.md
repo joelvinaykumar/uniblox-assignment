@@ -6,20 +6,20 @@ Starter Node.js + Express.js backend.
 
 - `npm run dev` - start the server with auto-reload
 - `npm start` - start the server normally
-- `npm run db:setup` - create and seed the PostgreSQL `auth_users` table
+- `npm run db:setup` - create and seed PostgreSQL tables (auth users, products, carts)
 - `npm run lint` - run ESLint
 - `npm test` - run Node's built-in test runner
 
 ## Database
 
-The service requires a PostgreSQL database for authentication users. A local
-PostgreSQL instance is expected (Docker setup is intentionally deferred).
+The service requires a PostgreSQL database. A local PostgreSQL instance is
+expected (Docker setup is intentionally deferred).
 
 Setup:
 
 1. Create a database, e.g. `uniblox_assignment`.
 2. Set `DATABASE_URL` in `.env`.
-3. Run `npm run db:setup` to create and seed the `auth_users` table.
+3. Run `npm run db:setup` to create and seed auth users, products, and carts.
 
 The server validates `DATABASE_URL`, `JWT_SECRET`, database connectivity, and
 the presence of seeded users at startup, and fails fast if any check fails.
@@ -38,6 +38,11 @@ the presence of seeded users at startup, and fails fast if any check fails.
 - `POST /api/products` - create a product (`product:write` + `inventory:adjust`)
 - `PATCH /api/products/:id` - update a product (`product:write`; stock replacement also requires `inventory:adjust`)
 - `POST /api/products/:id/inventory-adjustments` - add/remove stock (`inventory:adjust`)
+- `POST /api/carts` - create or return the customer's open cart (`cart:manage`)
+- `GET /api/carts/:id` - view a cart with live prices (`cart:manage`, owner only)
+- `POST /api/carts/:id/items` - add a product quantity (`cart:manage`, owner only)
+- `PATCH /api/carts/:id/items/:productId` - set a line quantity (`cart:manage`, owner only)
+- `DELETE /api/carts/:id/items/:productId` - remove a line (`cart:manage`, owner only)
 
 ## Authentication
 

@@ -31,6 +31,10 @@ const swaggerSpec = swaggerJsdoc({
         name: 'Products',
         description: 'Product catalog and inventory (authenticated reads, permission-protected writes)',
       },
+      {
+        name: 'Carts',
+        description: 'Customer carts. Live prices; inventory is not reserved until checkout.',
+      },
     ],
     components: {
       securitySchemes: {
@@ -251,6 +255,48 @@ const swaggerSpec = swaggerJsdoc({
               description: 'Non-zero integer to add (positive) or remove (negative) from inventory',
               example: 50,
             },
+          },
+        },
+        CartItem: {
+          type: 'object',
+          properties: {
+            productId: { type: 'string', example: '1' },
+            name: { type: 'string', example: 'Classic Ceramic Mug' },
+            quantity: { type: 'integer', example: 2 },
+            unitPriceCents: { type: 'integer', example: 1299 },
+            lineTotalCents: { type: 'integer', example: 2598 },
+            availableInventory: { type: 'integer', example: 500 },
+            isActive: { type: 'boolean', example: true },
+          },
+        },
+        Cart: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: '1' },
+            customerId: { type: 'string', example: 'usr_customer_demo' },
+            status: { type: 'string', enum: ['open', 'checked_out'], example: 'open' },
+            items: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/CartItem' },
+            },
+            subtotalCents: { type: 'integer', example: 2598 },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        AddCartItemRequest: {
+          type: 'object',
+          required: ['productId', 'quantity'],
+          properties: {
+            productId: { type: 'string', example: '1' },
+            quantity: { type: 'integer', minimum: 1, example: 2 },
+          },
+        },
+        UpdateCartItemRequest: {
+          type: 'object',
+          required: ['quantity'],
+          properties: {
+            quantity: { type: 'integer', minimum: 1, example: 3 },
           },
         },
       },
@@ -765,6 +811,345 @@ const swaggerSpec = swaggerJsdoc({
                   schema: {
                     $ref: '#/components/schemas/ErrorResponse',
                   },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/carts': {
+        post: {
+          summary: 'Create or return the authenticated customer open cart',
+          tags: ['Carts'],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: {
+              description: 'Existing open cart returned',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      cart: { $ref: '#/components/schemas/Cart' },
+                    },
+                  },
+                },
+              },
+            },
+            201: {
+              description: 'Open cart created',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      cart: { $ref: '#/components/schemas/Cart' },
+                    },
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            403: {
+              description: 'Missing required permission: cart:manage',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/carts/{id}': {
+        get: {
+          summary: 'Get a cart with live product prices (owner only)',
+          tags: ['Carts'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              example: '1',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Cart found',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      cart: { $ref: '#/components/schemas/Cart' },
+                    },
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            403: {
+              description: 'Caller does not own the cart',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            404: {
+              description: 'Cart not found',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/carts/{id}/items': {
+        post: {
+          summary: 'Add a product quantity to an open cart',
+          tags: ['Carts'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              example: '1',
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AddCartItemRequest' },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Item added',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      cart: { $ref: '#/components/schemas/Cart' },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Invalid product or quantity',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            403: {
+              description: 'Caller does not own the cart',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            404: {
+              description: 'Cart not found',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            409: {
+              description: 'Cart is already checked out',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/carts/{id}/items/{productId}': {
+        patch: {
+          summary: 'Set a cart line quantity',
+          tags: ['Carts'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              example: '1',
+            },
+            {
+              name: 'productId',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              example: '1',
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/UpdateCartItemRequest' },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Quantity updated',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      cart: { $ref: '#/components/schemas/Cart' },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Invalid quantity or unavailable product',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            403: {
+              description: 'Caller does not own the cart',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            404: {
+              description: 'Cart or cart item not found',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            409: {
+              description: 'Cart is already checked out',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+          },
+        },
+        delete: {
+          summary: 'Remove a product from an open cart',
+          tags: ['Carts'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              example: '1',
+            },
+            {
+              name: 'productId',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              example: '1',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Item removed',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      cart: { $ref: '#/components/schemas/Cart' },
+                    },
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            403: {
+              description: 'Caller does not own the cart',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            404: {
+              description: 'Cart or cart item not found',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            409: {
+              description: 'Cart is already checked out',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
                 },
               },
             },
