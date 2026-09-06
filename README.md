@@ -6,7 +6,7 @@ Starter Node.js + Express.js backend.
 
 - `npm run dev` - start the server with auto-reload
 - `npm start` - start the server normally
-- `npm run db:setup` - create and seed PostgreSQL tables (auth users, products, carts)
+- `npm run db:setup` - create and seed PostgreSQL tables (auth users, products, carts, orders)
 - `npm run lint` - run ESLint
 - `npm test` - run Node's built-in test runner
 
@@ -19,7 +19,7 @@ Setup:
 
 1. Create a database, e.g. `uniblox_assignment`.
 2. Set `DATABASE_URL` in `.env`.
-3. Run `npm run db:setup` to create and seed auth users, products, and carts.
+3. Run `npm run db:setup` to create and seed auth users, products, carts, and orders.
 
 The server validates `DATABASE_URL`, `JWT_SECRET`, database connectivity, and
 the presence of seeded users at startup, and fails fast if any check fails.
@@ -43,6 +43,14 @@ the presence of seeded users at startup, and fails fast if any check fails.
 - `POST /api/carts/:id/items` - add a product quantity (`cart:manage`, owner only)
 - `PATCH /api/carts/:id/items/:productId` - set a line quantity (`cart:manage`, owner only)
 - `DELETE /api/carts/:id/items/:productId` - remove a line (`cart:manage`, owner only)
+- `POST /api/carts/:id/checkout` - checkout a cart (`order:create`, owner only, requires `Idempotency-Key`)
+- `GET /api/orders` - list orders (customers see their own; admins see all)
+- `GET /api/orders/:id` - get an immutable order receipt (`order:read:own` or `order:read:any`)
+
+Checkout treats a committed database transaction as payment success. Orders snapshot
+product names, quantities, unit prices, and totals so receipts remain explainable
+after catalog changes. Coupon redemption is intentionally rejected for now and will
+be implemented after the orders API.
 
 ## Authentication
 

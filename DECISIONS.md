@@ -144,3 +144,31 @@ transaction that actually creates an order.
 **Consequences:** A cart total can change between view and checkout. An item
 valid at add-time can fail later if stock drops. Checkout must re-validate
 every line against live inventory and snapshot prices onto the order.
+
+## Decision: Transactional checkout with customer-scoped idempotency
+
+**Context:** Checkout must not oversell inventory, must not create more than one
+order for a cart, and must be safe when a client retries after a timeout or lost
+response. Coupon redemption is not implemented in this slice.
+
+**Options considered:** Rely on application checks only, lock the cart and product
+rows in one PostgreSQL transaction, or introduce an external workflow/payment
+system.
+
+**Choice:** Checkout runs in a single PostgreSQL transaction. It locks the
+customer/idempotency-key pair with an advisory transaction lock, locks the cart,
+locks product rows in deterministic product-ID order, validates inventory using
+live prices, decrements stock, inserts immutable order line snapshots, and marks
+the cart checked out. The `Idempotency-Key` is scoped to the authenticated
+customer and checkout fingerprint. Successful commit is treated as payment
+success.
+
+**Why:** PostgreSQL row locks and uniqueness constraints are the simplest durable
+way to protect inventory and retry behavior in the current stack. External
+payments, email, outbox, and frontend notification workflows are outside scope.
+
+**Consequences:** Replaying the same key and cart returns the existing order.
+Reusing the same key for a different checkout returns `IdempotencyConflictError`.
+A different key for an already checked-out cart returns `CartNotOpenError`.
+Supplying a coupon code currently returns `CouponNotSupportedError`; coupon
+generation/redemption will be implemented after orders.

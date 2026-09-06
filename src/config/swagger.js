@@ -35,6 +35,10 @@ const swaggerSpec = swaggerJsdoc({
         name: 'Carts',
         description: 'Customer carts. Live prices; inventory is not reserved until checkout.',
       },
+      {
+        name: 'Orders',
+        description: 'Checkout and immutable order receipts.',
+      },
     ],
     components: {
       securitySchemes: {
@@ -297,6 +301,33 @@ const swaggerSpec = swaggerJsdoc({
           required: ['quantity'],
           properties: {
             quantity: { type: 'integer', minimum: 1, example: 3 },
+          },
+        },
+        OrderItem: {
+          type: 'object',
+          properties: {
+            productId: { type: 'string', example: '1' },
+            productName: { type: 'string', example: 'Classic Ceramic Mug' },
+            quantity: { type: 'integer', example: 2 },
+            unitPriceCents: { type: 'integer', example: 1299 },
+            lineTotalCents: { type: 'integer', example: 2598 },
+          },
+        },
+        Order: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: '1' },
+            customerId: { type: 'string', example: 'usr_customer_demo' },
+            cartId: { type: 'string', example: '1' },
+            status: { type: 'string', enum: ['confirmed'], example: 'confirmed' },
+            subtotalCents: { type: 'integer', example: 2598 },
+            discountCents: { type: 'integer', example: 0 },
+            totalCents: { type: 'integer', example: 2598 },
+            items: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/OrderItem' },
+            },
+            createdAt: { type: 'string', format: 'date-time' },
           },
         },
       },
@@ -1147,6 +1178,218 @@ const swaggerSpec = swaggerJsdoc({
             },
             409: {
               description: 'Cart is already checked out',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/carts/{id}/checkout': {
+        post: {
+          summary: 'Checkout an open cart',
+          tags: ['Orders'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              example: '1',
+            },
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: true,
+              schema: { type: 'string', maxLength: 128 },
+              example: 'checkout-2026-09-06-001',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Idempotent replay; existing order returned',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      order: { $ref: '#/components/schemas/Order' },
+                      replayed: { type: 'boolean', example: true },
+                    },
+                  },
+                },
+              },
+            },
+            201: {
+              description: 'Order created and inventory decremented',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      order: { $ref: '#/components/schemas/Order' },
+                      replayed: { type: 'boolean', example: false },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Invalid request, empty cart, or unsupported coupon code',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            403: {
+              description: 'Missing order:create permission or caller does not own the cart',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            404: {
+              description: 'Cart not found',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            409: {
+              description: 'Cart already checked out, idempotency conflict, unavailable product, or insufficient inventory',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/orders': {
+        get: {
+          summary: 'List orders',
+          tags: ['Orders'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'limit',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+            },
+            {
+              name: 'offset',
+              in: 'query',
+              required: false,
+              schema: { type: 'integer', minimum: 0, default: 0 },
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Orders visible to the authenticated caller',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      orders: {
+                        type: 'array',
+                        items: { $ref: '#/components/schemas/Order' },
+                      },
+                      pagination: { type: 'object' },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Invalid pagination',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            403: {
+              description: 'Missing order read permission',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/orders/{id}': {
+        get: {
+          summary: 'Get an immutable order receipt',
+          tags: ['Orders'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: { type: 'string' },
+              example: '1',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Order found',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      order: { $ref: '#/components/schemas/Order' },
+                    },
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            403: {
+              description: 'Caller does not own the order and lacks order:read:any',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/ErrorResponse' },
+                },
+              },
+            },
+            404: {
+              description: 'Order not found',
               content: {
                 'application/json': {
                   schema: { $ref: '#/components/schemas/ErrorResponse' },

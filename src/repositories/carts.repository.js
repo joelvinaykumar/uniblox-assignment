@@ -1,4 +1,4 @@
-const { query } = require('../db/pool');
+const { query, execute } = require('../db/pool');
 
 function mapCart(row, items = []) {
   return {
@@ -35,8 +35,9 @@ function withTotals(cart) {
   };
 }
 
-async function getCartRowById(id) {
-  const result = await query(
+async function getCartRowById(id, db = query) {
+  const result = await execute(
+    db,
     'SELECT id, customer_id, status, created_at, updated_at FROM carts WHERE id = $1',
     [id],
   );
@@ -44,8 +45,22 @@ async function getCartRowById(id) {
   return result.rows[0];
 }
 
-async function findOpenCartByCustomerId(customerId) {
-  const result = await query(
+async function lockCartRowById(id, db) {
+  const result = await execute(
+    db,
+    `SELECT id, customer_id, status, created_at, updated_at
+     FROM carts
+     WHERE id = $1
+     FOR UPDATE`,
+    [id],
+  );
+
+  return result.rows[0];
+}
+
+async function findOpenCartByCustomerId(customerId, db = query) {
+  const result = await execute(
+    db,
     `SELECT id, customer_id, status, created_at, updated_at
      FROM carts
      WHERE customer_id = $1 AND status = 'open'`,
@@ -55,8 +70,9 @@ async function findOpenCartByCustomerId(customerId) {
   return result.rows[0];
 }
 
-async function listCartItems(cartId) {
-  const result = await query(
+async function listCartItems(cartId, db = query) {
+  const result = await execute(
+    db,
     `SELECT
        i.product_id,
        i.quantity,
@@ -74,18 +90,36 @@ async function listCartItems(cartId) {
   return result.rows.map(mapItem);
 }
 
-async function getCartById(id) {
-  const row = await getCartRowById(id);
+async function listRawCartItems(cartId, db) {
+  const result = await execute(
+    db,
+    `SELECT product_id, quantity
+     FROM cart_items
+     WHERE cart_id = $1
+     ORDER BY product_id`,
+    [cartId],
+  );
+
+  return result.rows;
+}
+
+async function getCartById(id, db = query) {
+  const row = await getCartRowById(id, db);
 
   if (!row) {
     return undefined;
   }
 
-  return withTotals(mapCart(row, await listCartItems(row.id)));
+  return withTotals(mapCart(row, await listCartItems(row.id, db)));
 }
 
-async function createCart(customerId) {
-  const result = await query(
+async function getCartFromRow(row, db = query) {
+  return withTotals(mapCart(row, await listCartItems(row.id, db)));
+}
+
+async function createCart(customerId, db = query) {
+  const result = await execute(
+    db,
     `INSERT INTO carts (customer_id)
      VALUES ($1)
      RETURNING id, customer_id, status, created_at, updated_at`,
@@ -95,8 +129,9 @@ async function createCart(customerId) {
   return withTotals(mapCart(result.rows[0], []));
 }
 
-async function addOrIncrementItem(cartId, productId, quantity) {
-  await query(
+async function addOrIncrementItem(cartId, productId, quantity, db = query) {
+  await execute(
+    db,
     `INSERT INTO cart_items (cart_id, product_id, quantity)
      VALUES ($1, $2, $3)
      ON CONFLICT (cart_id, product_id)
@@ -106,13 +141,14 @@ async function addOrIncrementItem(cartId, productId, quantity) {
     [cartId, productId, quantity],
   );
 
-  await query('UPDATE carts SET updated_at = now() WHERE id = $1', [cartId]);
+  await execute(db, 'UPDATE carts SET updated_at = now() WHERE id = $1', [cartId]);
 
-  return getCartById(cartId);
+  return getCartById(cartId, db);
 }
 
-async function setItemQuantity(cartId, productId, quantity) {
-  const result = await query(
+async function setItemQuantity(cartId, productId, quantity, db = query) {
+  const result = await execute(
+    db,
     `UPDATE cart_items
      SET quantity = $3, updated_at = now()
      WHERE cart_id = $1 AND product_id = $2
@@ -124,13 +160,14 @@ async function setItemQuantity(cartId, productId, quantity) {
     return undefined;
   }
 
-  await query('UPDATE carts SET updated_at = now() WHERE id = $1', [cartId]);
+  await execute(db, 'UPDATE carts SET updated_at = now() WHERE id = $1', [cartId]);
 
-  return getCartById(cartId);
+  return getCartById(cartId, db);
 }
 
-async function removeItem(cartId, productId) {
-  const result = await query(
+async function removeItem(cartId, productId, db = query) {
+  const result = await execute(
+    db,
     `DELETE FROM cart_items
      WHERE cart_id = $1 AND product_id = $2
      RETURNING product_id`,
@@ -141,14 +178,17 @@ async function removeItem(cartId, productId) {
     return undefined;
   }
 
-  await query('UPDATE carts SET updated_at = now() WHERE id = $1', [cartId]);
+  await execute(db, 'UPDATE carts SET updated_at = now() WHERE id = $1', [cartId]);
 
-  return getCartById(cartId);
+  return getCartById(cartId, db);
 }
 
 module.exports = {
   findOpenCartByCustomerId,
   getCartById,
+  getCartFromRow,
+  lockCartRowById,
+  listRawCartItems,
   createCart,
   addOrIncrementItem,
   setItemQuantity,

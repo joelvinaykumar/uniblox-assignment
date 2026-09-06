@@ -1,52 +1,23 @@
 const express = require('express');
 
 const { authenticateJwt, requirePermission } = require('../middleware/auth.middleware');
-const { getProductById } = require('../repositories/products.repository');
+const { checkoutCart } = require('../services/checkout.service');
 const {
   findOpenCartByCustomerId,
   getCartById,
   createCart,
-  addOrIncrementItem,
-  setItemQuantity,
-  removeItem,
 } = require('../repositories/carts.repository');
+const {
+  addItemToCart,
+  setCartItemQuantity,
+  removeItemFromCart,
+  getOwnedCart,
+} = require('../services/cart.service');
+const { parseResourceId } = require('../utils/identifiers');
 
 const router = express.Router();
 const requireCartManage = requirePermission('cart:manage');
-
-function isPositiveInteger(value) {
-  return Number.isInteger(value) && value > 0;
-}
-
-async function loadOwnedOpenCart(req, res) {
-  const cart = await getCartById(req.params.id);
-
-  if (!cart) {
-    res.status(404).json({
-      error: 'NotFoundError',
-      message: `Cart ${req.params.id} was not found`,
-    });
-    return undefined;
-  }
-
-  if (cart.customerId !== req.user.sub) {
-    res.status(403).json({
-      error: 'ForbiddenError',
-      message: 'Resource ownership or cross-owner permission is required',
-    });
-    return undefined;
-  }
-
-  if (cart.status !== 'open') {
-    res.status(409).json({
-      error: 'CartNotOpenError',
-      message: 'Checked-out carts cannot be modified',
-    });
-    return undefined;
-  }
-
-  return cart;
-}
+const requireOrderCreate = requirePermission('order:create');
 
 router.post('/', authenticateJwt, requireCartManage, async (req, res, next) => {
   try {
@@ -78,23 +49,24 @@ router.post('/', authenticateJwt, requireCartManage, async (req, res, next) => {
 
 router.get('/:id', authenticateJwt, requireCartManage, async (req, res, next) => {
   try {
-    const cart = await getCartById(req.params.id);
-
-    if (!cart) {
-      return res.status(404).json({
-        error: 'NotFoundError',
-        message: `Cart ${req.params.id} was not found`,
-      });
-    }
-
-    if (cart.customerId !== req.user.sub) {
-      return res.status(403).json({
-        error: 'ForbiddenError',
-        message: 'Resource ownership or cross-owner permission is required',
-      });
-    }
-
+    const cartId = parseResourceId(req.params.id, 'cartId');
+    const cart = await getOwnedCart(cartId, req.user.sub);
     return res.json({ cart });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/:id/checkout', authenticateJwt, requireOrderCreate, async (req, res, next) => {
+  try {
+    const { order, replayed } = await checkoutCart({
+      customerId: req.user.sub,
+      cartId: parseResourceId(req.params.id, 'cartId'),
+      idempotencyKey: req.get('Idempotency-Key'),
+      body: req.body,
+    });
+
+    return res.status(replayed ? 200 : 201).json({ order, replayed });
   } catch (error) {
     return next(error);
   }
@@ -102,48 +74,14 @@ router.get('/:id', authenticateJwt, requireCartManage, async (req, res, next) =>
 
 router.post('/:id/items', authenticateJwt, requireCartManage, async (req, res, next) => {
   try {
-    const cart = await loadOwnedOpenCart(req, res);
-
-    if (!cart) {
-      return undefined;
-    }
-
     const { productId, quantity } = req.body;
+    const updated = await addItemToCart({
+      cartId: parseResourceId(req.params.id, 'cartId'),
+      customerId: req.user.sub,
+      productId: parseResourceId(productId, 'productId'),
+      quantity,
+    });
 
-    if (productId === undefined || productId === null || String(productId).trim() === '') {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'productId is required',
-      });
-    }
-
-    if (!isPositiveInteger(quantity)) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'quantity is required and must be a positive integer',
-      });
-    }
-
-    const product = await getProductById(productId);
-
-    if (!product || !product.isActive) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'Product is not available',
-      });
-    }
-
-    const existing = cart.items.find((item) => item.productId === String(product.id));
-    const nextQuantity = (existing ? existing.quantity : 0) + quantity;
-
-    if (nextQuantity > product.availableInventory) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'quantity exceeds available inventory',
-      });
-    }
-
-    const updated = await addOrIncrementItem(cart.id, product.id, quantity);
     return res.json({ cart: updated });
   } catch (error) {
     return next(error);
@@ -152,45 +90,13 @@ router.post('/:id/items', authenticateJwt, requireCartManage, async (req, res, n
 
 router.patch('/:id/items/:productId', authenticateJwt, requireCartManage, async (req, res, next) => {
   try {
-    const cart = await loadOwnedOpenCart(req, res);
-
-    if (!cart) {
-      return undefined;
-    }
-
     const { quantity } = req.body;
-
-    if (!isPositiveInteger(quantity)) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'quantity is required and must be a positive integer',
-      });
-    }
-
-    const product = await getProductById(req.params.productId);
-
-    if (!product || !product.isActive) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'Product is not available',
-      });
-    }
-
-    if (quantity > product.availableInventory) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'quantity exceeds available inventory',
-      });
-    }
-
-    const updated = await setItemQuantity(cart.id, product.id, quantity);
-
-    if (!updated) {
-      return res.status(404).json({
-        error: 'NotFoundError',
-        message: `Product ${req.params.productId} is not in cart ${cart.id}`,
-      });
-    }
+    const updated = await setCartItemQuantity({
+      cartId: parseResourceId(req.params.id, 'cartId'),
+      customerId: req.user.sub,
+      productId: parseResourceId(req.params.productId, 'productId'),
+      quantity,
+    });
 
     return res.json({ cart: updated });
   } catch (error) {
@@ -200,20 +106,11 @@ router.patch('/:id/items/:productId', authenticateJwt, requireCartManage, async 
 
 router.delete('/:id/items/:productId', authenticateJwt, requireCartManage, async (req, res, next) => {
   try {
-    const cart = await loadOwnedOpenCart(req, res);
-
-    if (!cart) {
-      return undefined;
-    }
-
-    const updated = await removeItem(cart.id, req.params.productId);
-
-    if (!updated) {
-      return res.status(404).json({
-        error: 'NotFoundError',
-        message: `Product ${req.params.productId} is not in cart ${cart.id}`,
-      });
-    }
+    const updated = await removeItemFromCart({
+      cartId: parseResourceId(req.params.id, 'cartId'),
+      customerId: req.user.sub,
+      productId: parseResourceId(req.params.productId, 'productId'),
+    });
 
     return res.json({ cart: updated });
   } catch (error) {

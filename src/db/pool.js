@@ -20,6 +20,12 @@ function query(text, params) {
   return getPool().query(text, params);
 }
 
+// Runs a query against either the shared pool (via the `query` function)
+// or an active transaction client, so repositories can be transaction-aware.
+function execute(db, text, params) {
+  return typeof db === 'function' ? db(text, params) : db.query(text, params);
+}
+
 async function withTransaction(callback) {
   const client = await getPool().connect();
 
@@ -46,6 +52,7 @@ async function closePool() {
 module.exports = {
   getPool,
   query,
+  execute,
   withTransaction,
   closePool,
 };
