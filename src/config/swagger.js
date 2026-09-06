@@ -16,6 +16,10 @@ const swaggerSpec = swaggerJsdoc({
     ],
     tags: [
       {
+        name: 'Auth',
+        description: 'Authentication and JWT identity endpoints',
+      },
+      {
         name: 'Health',
         description: 'Application health checks',
       },
@@ -25,7 +29,73 @@ const swaggerSpec = swaggerJsdoc({
       },
     ],
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
       schemas: {
+        LoginRequest: {
+          type: 'object',
+          required: ['email', 'password'],
+          properties: {
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'customer@example.com',
+            },
+            password: {
+              type: 'string',
+              format: 'password',
+              example: 'customer123',
+            },
+          },
+        },
+        AuthUser: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              example: 'usr_customer_demo',
+            },
+            name: {
+              type: 'string',
+              example: 'Demo Customer',
+            },
+            email: {
+              type: 'string',
+              format: 'email',
+              example: 'customer@example.com',
+            },
+            role: {
+              type: 'string',
+              enum: ['customer', 'admin'],
+              example: 'customer',
+            },
+          },
+        },
+        LoginResponse: {
+          type: 'object',
+          properties: {
+            token: {
+              type: 'string',
+              example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+            },
+            tokenType: {
+              type: 'string',
+              example: 'Bearer',
+            },
+            expiresIn: {
+              type: 'string',
+              example: '1h',
+            },
+            user: {
+              $ref: '#/components/schemas/AuthUser',
+            },
+          },
+        },
         CreateUserRequest: {
           type: 'object',
           required: ['name', 'email'],
@@ -97,6 +167,80 @@ const swaggerSpec = swaggerJsdoc({
           responses: {
             200: {
               description: 'API is healthy',
+            },
+          },
+        },
+      },
+      '/api/auth/login': {
+        post: {
+          summary: 'Authenticate and receive a JWT',
+          tags: ['Auth'],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/LoginRequest',
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Authentication succeeded',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/LoginResponse',
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Missing email or password',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Invalid credentials',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/auth/me': {
+        get: {
+          summary: 'Return the authenticated JWT subject',
+          tags: ['Auth'],
+          security: [
+            {
+              bearerAuth: [],
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Authenticated token payload',
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
             },
           },
         },
