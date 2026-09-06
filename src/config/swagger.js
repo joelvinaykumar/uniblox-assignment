@@ -163,7 +163,8 @@ const swaggerSpec = swaggerJsdoc({
           properties: {
             id: {
               type: 'string',
-              example: '1',
+              format: 'uuid',
+              example: '9f1c2d3e-4b5a-6c7d-8e9f-0a1b2c3d4e5f',
             },
             name: {
               type: 'string',
@@ -264,7 +265,7 @@ const swaggerSpec = swaggerJsdoc({
         CartItem: {
           type: 'object',
           properties: {
-            productId: { type: 'string', example: '1' },
+            productId: { type: 'string', format: 'uuid', example: '9f1c2d3e-4b5a-6c7d-8e9f-0a1b2c3d4e5f' },
             name: { type: 'string', example: 'Classic Ceramic Mug' },
             quantity: { type: 'integer', example: 2 },
             unitPriceCents: { type: 'integer', example: 1299 },
@@ -292,7 +293,7 @@ const swaggerSpec = swaggerJsdoc({
           type: 'object',
           required: ['productId', 'quantity'],
           properties: {
-            productId: { type: 'string', example: '1' },
+            productId: { type: 'string', format: 'uuid', example: '9f1c2d3e-4b5a-6c7d-8e9f-0a1b2c3d4e5f' },
             quantity: { type: 'integer', minimum: 1, example: 2 },
           },
         },
@@ -306,7 +307,7 @@ const swaggerSpec = swaggerJsdoc({
         OrderItem: {
           type: 'object',
           properties: {
-            productId: { type: 'string', example: '1' },
+            productId: { type: 'string', format: 'uuid', example: '9f1c2d3e-4b5a-6c7d-8e9f-0a1b2c3d4e5f' },
             productName: { type: 'string', example: 'Classic Ceramic Mug' },
             quantity: { type: 'integer', example: 2 },
             unitPriceCents: { type: 'integer', example: 1299 },

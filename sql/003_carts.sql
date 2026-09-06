@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS carts_customer_id_idx ON carts (customer_id);
 CREATE TABLE IF NOT EXISTS cart_items (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   cart_id bigint NOT NULL REFERENCES carts (id) ON DELETE CASCADE,
-  product_id bigint NOT NULL REFERENCES products (id),
+  product_id uuid NOT NULL REFERENCES products (id),
   quantity integer NOT NULL CHECK (quantity > 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

@@ -13,7 +13,7 @@ const {
   removeItemFromCart,
   getOwnedCart,
 } = require('../services/cart.service');
-const { parseResourceId } = require('../utils/identifiers');
+const { parseResourceId, parseUuid } = require('../utils/identifiers');
 
 const router = express.Router();
 const requireCartManage = requirePermission('cart:manage');
@@ -78,7 +78,7 @@ router.post('/:id/items', authenticateJwt, requireCartManage, async (req, res, n
     const updated = await addItemToCart({
       cartId: parseResourceId(req.params.id, 'cartId'),
       customerId: req.user.sub,
-      productId: parseResourceId(productId, 'productId'),
+      productId: parseUuid(productId, 'productId'),
       quantity,
     });
 
@@ -94,7 +94,7 @@ router.patch('/:id/items/:productId', authenticateJwt, requireCartManage, async 
     const updated = await setCartItemQuantity({
       cartId: parseResourceId(req.params.id, 'cartId'),
       customerId: req.user.sub,
-      productId: parseResourceId(req.params.productId, 'productId'),
+      productId: parseUuid(req.params.productId, 'productId'),
       quantity,
     });
 
@@ -109,7 +109,7 @@ router.delete('/:id/items/:productId', authenticateJwt, requireCartManage, async
     const updated = await removeItemFromCart({
       cartId: parseResourceId(req.params.id, 'cartId'),
       customerId: req.user.sub,
-      productId: parseResourceId(req.params.productId, 'productId'),
+      productId: parseUuid(req.params.productId, 'productId'),
     });
 
     return res.json({ cart: updated });

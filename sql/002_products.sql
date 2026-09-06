@@ -4,8 +4,12 @@
 -- evolve without schema migrations. Core invariants (price, inventory) are
 -- typed columns with constraints.
 
+-- gen_random_uuid() is built into PostgreSQL 13+; pgcrypto guarantees it on
+-- older versions and is a harmless no-op when already present.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS products (
-  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   unit_price_cents integer NOT NULL CHECK (unit_price_cents >= 0),
   available_inventory integer NOT NULL CHECK (available_inventory >= 0),

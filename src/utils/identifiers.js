@@ -25,4 +25,24 @@ function parseResourceId(value, fieldName = 'id') {
   return raw;
 }
 
-module.exports = { parseResourceId };
+// RFC 4122 UUID (any version). Product identifiers are UUIDs; validating the
+// shape here returns a clean 400 instead of leaking a raw PostgreSQL
+// "invalid input syntax for type uuid" (22P02) error.
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseUuid(value, fieldName = 'id') {
+  if (value === undefined || value === null) {
+    throw createHttpError(400, 'ValidationError', `${fieldName} is required`);
+  }
+
+  const raw = String(value).trim();
+
+  if (!UUID_PATTERN.test(raw)) {
+    throw createHttpError(400, 'ValidationError', `${fieldName} must be a valid UUID`);
+  }
+
+  return raw.toLowerCase();
+}
+
+module.exports = { parseResourceId, parseUuid };

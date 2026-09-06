@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS orders_customer_created_idx
 CREATE TABLE IF NOT EXISTS order_items (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   order_id bigint NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
-  product_id bigint NOT NULL REFERENCES products (id),
+  product_id uuid NOT NULL REFERENCES products (id),
   product_name text NOT NULL,
   quantity integer NOT NULL CHECK (quantity > 0),
   unit_price_cents integer NOT NULL CHECK (unit_price_cents >= 0),

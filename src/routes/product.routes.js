@@ -12,6 +12,7 @@ const {
   updateProduct,
   adjustInventory,
 } = require('../repositories/products.repository');
+const { parseUuid } = require('../utils/identifiers');
 
 const router = express.Router();
 
@@ -49,12 +50,13 @@ router.get('/', authenticateJwt, requireProductRead, async (req, res, next) => {
 // Authenticated (customer or admin): product detail
 router.get('/:id', authenticateJwt, requireProductRead, async (req, res, next) => {
   try {
-    const product = await getProductById(req.params.id);
+    const productId = parseUuid(req.params.id, 'productId');
+    const product = await getProductById(productId);
 
     if (!product) {
       return res.status(404).json({
         error: 'NotFoundError',
-        message: `Product ${req.params.id} was not found`,
+        message: `Product ${productId} was not found`,
       });
     }
 
@@ -181,12 +183,13 @@ router.patch('/:id', authenticateJwt, requireProductPatchPermissions, async (req
       });
     }
 
-    const product = await updateProduct(req.params.id, fields);
+    const productId = parseUuid(req.params.id, 'productId');
+    const product = await updateProduct(productId, fields);
 
     if (!product) {
       return res.status(404).json({
         error: 'NotFoundError',
-        message: `Product ${req.params.id} was not found`,
+        message: `Product ${productId} was not found`,
       });
     }
 
@@ -208,16 +211,17 @@ router.post('/:id/inventory-adjustments', authenticateJwt, requireInventoryAdjus
       });
     }
 
-    const existing = await getProductById(req.params.id);
+    const productId = parseUuid(req.params.id, 'productId');
+    const existing = await getProductById(productId);
 
     if (!existing) {
       return res.status(404).json({
         error: 'NotFoundError',
-        message: `Product ${req.params.id} was not found`,
+        message: `Product ${productId} was not found`,
       });
     }
 
-    const product = await adjustInventory(req.params.id, delta);
+    const product = await adjustInventory(productId, delta);
 
     if (!product) {
       return res.status(400).json({

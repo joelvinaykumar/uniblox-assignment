@@ -62,7 +62,7 @@ async function lockProductsForCheckout(db, cartItems) {
     db,
     `SELECT id, name, unit_price_cents, available_inventory, is_active
      FROM products
-     WHERE id = ANY($1::bigint[])
+     WHERE id = ANY($1::uuid[])
      ORDER BY id
      FOR UPDATE`,
     [productIds],
