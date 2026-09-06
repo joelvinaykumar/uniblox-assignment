@@ -19,6 +19,9 @@ function mapOrderRow(row, items = []) {
     subtotalCents: toSafeInteger(row.subtotal_cents, 'subtotalCents'),
     discountCents: toSafeInteger(row.discount_cents, 'discountCents'),
     totalCents: toSafeInteger(row.total_cents, 'totalCents'),
+    couponId: row.coupon_id ?? null,
+    couponCode: row.coupon_code ?? null,
+    couponDiscountPercent: row.coupon_discount_percent ?? null,
     items,
     createdAt: row.created_at,
   };
@@ -66,7 +69,8 @@ async function getOrderById(id, db = query) {
   const result = await execute(
     db,
     `SELECT id, customer_id, cart_id, idempotency_key, status,
-            subtotal_cents, discount_cents, total_cents, created_at
+          subtotal_cents, discount_cents, total_cents, created_at,
+          coupon_id, coupon_code, coupon_discount_percent
      FROM orders
      WHERE id = $1`,
     [id],
@@ -80,7 +84,8 @@ async function getOrderByCartId(cartId, db = query) {
   const result = await execute(
     db,
     `SELECT id, customer_id, cart_id, idempotency_key, status,
-            subtotal_cents, discount_cents, total_cents, created_at
+          subtotal_cents, discount_cents, total_cents, created_at,
+          coupon_id, coupon_code, coupon_discount_percent
      FROM orders
      WHERE cart_id = $1`,
     [cartId],
@@ -94,7 +99,8 @@ async function getOrderByIdempotencyKey(customerId, idempotencyKey, db = query, 
   const result = await execute(
     db,
     `SELECT id, customer_id, cart_id, idempotency_key, request_fingerprint, status,
-            subtotal_cents, discount_cents, total_cents, created_at
+          subtotal_cents, discount_cents, total_cents, created_at,
+          coupon_id, coupon_code, coupon_discount_percent
      FROM orders
      WHERE customer_id = $1 AND idempotency_key = $2
      ${lock ? 'FOR UPDATE' : ''}`,
@@ -112,6 +118,9 @@ async function createOrderWithItems({
   subtotalCents,
   discountCents,
   totalCents,
+  couponId = null,
+  couponCode = null,
+  couponDiscountPercent = null,
   items,
 }, db) {
   const orderResult = await execute(
@@ -123,12 +132,16 @@ async function createOrderWithItems({
        request_fingerprint,
        subtotal_cents,
        discount_cents,
-       total_cents
+       total_cents,
+       coupon_id,
+       coupon_code,
+       coupon_discount_percent
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING id, customer_id, cart_id, idempotency_key, status,
                subtotal_cents, discount_cents, total_cents, created_at`,
-    [customerId, cartId, idempotencyKey, requestFingerprint, subtotalCents, discountCents, totalCents],
+    [customerId, cartId, idempotencyKey, requestFingerprint, subtotalCents, discountCents, totalCents,
+      couponId, couponCode, couponDiscountPercent],
   );
 
   const orderId = orderResult.rows[0].id;
@@ -173,7 +186,8 @@ async function listOrders({ customerId, limit = 20, offset = 0 } = {}, db = quer
   const result = await execute(
     db,
     `SELECT id, customer_id, cart_id, idempotency_key, status,
-            subtotal_cents, discount_cents, total_cents, created_at
+          subtotal_cents, discount_cents, total_cents, created_at,
+          coupon_id, coupon_code, coupon_discount_percent
      FROM orders
      ${whereClause}
      ORDER BY created_at DESC, id DESC

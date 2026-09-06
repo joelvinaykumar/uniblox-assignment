@@ -11,6 +11,8 @@ const productRoutes = require('./routes/product.routes');
 const cartRoutes = require('./routes/cart.routes');
 const orderRoutes = require('./routes/order.routes');
 const userRoutes = require('./routes/user.routes');
+const { adminRouter: adminCouponRoutes, customerRouter: customerCouponRoutes } = require('./routes/coupon.routes');
+const reportRoutes = require('./routes/report.routes');
 
 const app = express();
 
@@ -34,6 +36,9 @@ app.use('/api/products', productRoutes);
 app.use('/api/carts', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admin', adminCouponRoutes);
+app.use('/api/admin/report', reportRoutes);
+app.use('/api/coupons', customerCouponRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

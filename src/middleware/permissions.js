@@ -5,6 +5,7 @@ const ROLE_PERMISSIONS = Object.freeze({
     'cart:manage',
     'order:create',
     'order:read:own',
+    'coupon:read:available',
   ]),
   admin: Object.freeze([
     'product:read',
@@ -12,6 +13,8 @@ const ROLE_PERMISSIONS = Object.freeze({
     'inventory:adjust',
     'order:read:any',
     'coupon:generate',
+    'coupon:config:read',
+    'coupon:config:write',
     'report:read',
   ]),
 });

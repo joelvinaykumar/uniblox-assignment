@@ -39,6 +39,14 @@ const swaggerSpec = swaggerJsdoc({
         name: 'Orders',
         description: 'Checkout and immutable order receipts.',
       },
+      {
+        name: 'Coupons',
+        description: 'Admin-managed rewards and customer coupon discovery.',
+      },
+      {
+        name: 'Reports',
+        description: 'Read-only administrative business summaries.',
+      },
     ],
     components: {
       securitySchemes: {
@@ -324,11 +332,97 @@ const swaggerSpec = swaggerJsdoc({
             subtotalCents: { type: 'integer', example: 2598 },
             discountCents: { type: 'integer', example: 0 },
             totalCents: { type: 'integer', example: 2598 },
+            couponId: { type: 'string', format: 'uuid', nullable: true },
+            couponCode: { type: 'string', nullable: true, example: 'CPN-A1B2C3D4' },
+            couponDiscountPercent: { type: 'integer', nullable: true, example: 10 },
             items: {
               type: 'array',
               items: { $ref: '#/components/schemas/OrderItem' },
             },
             createdAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        CheckoutRequest: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            couponCode: {
+              type: 'string',
+              nullable: true,
+              minLength: 1,
+              maxLength: 128,
+              pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$',
+              description: 'Optional issued coupon. Omit it to check out without a discount.',
+              example: 'CPN-A1B2C3D4',
+            },
+          },
+        },
+        CouponConfig: {
+          type: 'object',
+          properties: {
+            n: { type: 'integer', minimum: 1, example: 5 },
+            x: { type: 'integer', minimum: 1, maximum: 100, example: 10 },
+            version: { type: 'string', example: '1' },
+            confirmedOrders: { type: 'string', example: '12' },
+            earnedMilestones: { type: 'string', example: '2' },
+            updatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
+        UpdateCouponConfigRequest: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['n', 'x', 'version'],
+          properties: {
+            n: { type: 'integer', minimum: 1, example: 5 },
+            x: { type: 'integer', minimum: 1, maximum: 100, example: 10 },
+            version: { type: 'string', example: '1' },
+          },
+        },
+        CouponMilestone: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', example: '1' },
+            n: { type: 'integer', example: 5 },
+            discountPercent: { type: 'integer', example: 10 },
+            configVersion: { type: 'string', example: '1' },
+            earnedAt: { type: 'string', format: 'date-time' },
+            status: { type: 'string', enum: ['eligible'] },
+          },
+        },
+        Coupon: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            milestoneId: { type: 'string', example: '1' },
+            code: { type: 'string', example: 'CPN-A1B2C3D4' },
+            discountPercent: { type: 'integer', example: 10 },
+            status: { type: 'string', enum: ['issued', 'redeemed'] },
+            issuedAt: { type: 'string', format: 'date-time' },
+            redeemedAt: { type: 'string', format: 'date-time', nullable: true },
+          },
+        },
+        ProductPurchaseSummary: {
+          type: 'object',
+          properties: {
+            productId: { type: 'string', format: 'uuid' },
+            productName: { type: 'string', example: 'Classic Ceramic Mug' },
+            purchasedQuantity: { type: 'string', pattern: '^\\d+$', example: '3' },
+          },
+        },
+        AdminReport: {
+          type: 'object',
+          properties: {
+            purchasedQuantityByProduct: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/ProductPurchaseSummary' },
+            },
+            grossRevenueCents: { type: 'string', pattern: '^\\d+$', example: '3897' },
+            totalDiscountsCents: { type: 'string', pattern: '^\\d+$', example: '389' },
+            netRevenueCents: { type: 'string', pattern: '^\\d+$', example: '3508' },
+            couponsGenerated: { type: 'string', pattern: '^\\d+$', example: '2' },
+            couponsAvailable: { type: 'string', pattern: '^\\d+$', example: '1' },
+            couponsRedeemed: { type: 'string', pattern: '^\\d+$', example: '1' },
+            totalOrders: { type: 'string', pattern: '^\\d+$', example: '2' },
           },
         },
       },
@@ -1209,6 +1303,14 @@ const swaggerSpec = swaggerJsdoc({
               example: 'checkout-2026-09-06-001',
             },
           ],
+          requestBody: {
+            required: false,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CheckoutRequest' },
+              },
+            },
+          },
           responses: {
             200: {
               description: 'Idempotent replay; existing order returned',
@@ -1239,7 +1341,7 @@ const swaggerSpec = swaggerJsdoc({
               },
             },
             400: {
-              description: 'Invalid request, empty cart, or unsupported coupon code',
+              description: 'Invalid request, coupon format, or empty cart',
               content: {
                 'application/json': {
                   schema: { $ref: '#/components/schemas/ErrorResponse' },
@@ -1263,7 +1365,7 @@ const swaggerSpec = swaggerJsdoc({
               },
             },
             404: {
-              description: 'Cart not found',
+              description: 'Cart or coupon not found',
               content: {
                 'application/json': {
                   schema: { $ref: '#/components/schemas/ErrorResponse' },
@@ -1271,11 +1373,219 @@ const swaggerSpec = swaggerJsdoc({
               },
             },
             409: {
-              description: 'Cart already checked out, idempotency conflict, unavailable product, or insufficient inventory',
+              description: 'Cart checked out, coupon redeemed, idempotency conflict, unavailable product, or insufficient inventory',
               content: {
                 'application/json': {
                   schema: { $ref: '#/components/schemas/ErrorResponse' },
                 },
+              },
+            },
+          },
+        },
+      },
+      '/api/admin/coupon-config': {
+        get: {
+          summary: 'Read coupon reward configuration (admin only)',
+          tags: ['Coupons'],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: {
+              description: 'Current configuration and reconciled historical reward totals',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: { config: { $ref: '#/components/schemas/CouponConfig' } },
+                  },
+                },
+              },
+            },
+            401: { description: 'Missing, invalid, or expired token' },
+            403: { description: 'Missing coupon:config:read permission' },
+          },
+        },
+        put: {
+          summary: 'Update N/X and immediately reconcile rewards (admin only)',
+          tags: ['Coupons'],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/UpdateCouponConfigRequest' },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Configuration updated',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: { config: { $ref: '#/components/schemas/CouponConfig' } },
+                  },
+                },
+              },
+            },
+            400: { description: 'Invalid N, X, or version' },
+            401: { description: 'Missing, invalid, or expired token' },
+            403: { description: 'Missing coupon:config:write permission' },
+            409: { description: 'Stale configuration version' },
+          },
+        },
+      },
+      '/api/admin/coupon-milestones': {
+        get: {
+          summary: 'List eligible, unissued reward milestones (admin only)',
+          tags: ['Coupons'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: 'status', in: 'query', schema: { type: 'string', enum: ['eligible'] } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+            { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          ],
+          responses: {
+            200: {
+              description: 'Eligible milestones',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      milestones: { type: 'array', items: { $ref: '#/components/schemas/CouponMilestone' } },
+                      pagination: { type: 'object' },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Missing, invalid, or expired token' },
+            403: { description: 'Missing coupon:generate permission' },
+          },
+        },
+      },
+      '/api/admin/coupons': {
+        post: {
+          summary: 'Generate a coupon for an eligible milestone (admin only)',
+          tags: ['Coupons'],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['milestoneId'],
+                  properties: { milestoneId: { type: 'string', example: '1' } },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Generation replay; existing coupon returned',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      coupon: { $ref: '#/components/schemas/Coupon' },
+                      replayed: { type: 'boolean', example: true },
+                    },
+                  },
+                },
+              },
+            },
+            201: {
+              description: 'Coupon generated',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      coupon: { $ref: '#/components/schemas/Coupon' },
+                      replayed: { type: 'boolean', example: false },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Invalid milestone ID',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            401: { description: 'Missing, invalid, or expired token' },
+            403: { description: 'Missing coupon:generate permission' },
+            404: {
+              description: 'Eligible milestone not found',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+          },
+        },
+      },
+      '/api/coupons/available': {
+        get: {
+          summary: 'List issued, unredeemed coupons (customer only)',
+          tags: ['Coupons'],
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+            { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, default: 0 } },
+          ],
+          responses: {
+            200: {
+              description: 'Available shared coupons; listing does not reserve them',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      coupons: { type: 'array', items: { $ref: '#/components/schemas/Coupon' } },
+                      pagination: { type: 'object' },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Missing, invalid, or expired token' },
+            403: { description: 'Missing coupon:read:available permission' },
+          },
+        },
+      },
+      '/api/admin/report': {
+        get: {
+          summary: 'Return the all-time administrative business report',
+          description: 'Read-only summary from one PostgreSQL snapshot; repeated requests do not mutate state.',
+          tags: ['Reports'],
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: {
+              description: 'Reconciled order, product, revenue, and coupon totals',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: { report: { $ref: '#/components/schemas/AdminReport' } },
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+              },
+            },
+            403: {
+              description: 'Missing report:read permission',
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
               },
             },
           },

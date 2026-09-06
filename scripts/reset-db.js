@@ -15,6 +15,9 @@ const { Client } = require('pg');
 const DROP_ORDER = [
   'order_items',
   'orders',
+  'coupons',
+  'coupon_milestones',
+  'coupon_config',
   'cart_items',
   'carts',
   'products',

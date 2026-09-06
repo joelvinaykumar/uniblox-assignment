@@ -149,7 +149,7 @@ every line against live inventory and snapshot prices onto the order.
 
 **Context:** Checkout must not oversell inventory, must not create more than one
 order for a cart, and must be safe when a client retries after a timeout or lost
-response. Coupon redemption is not implemented in this slice.
+response.
 
 **Options considered:** Rely on application checks only, lock the cart and product
 rows in one PostgreSQL transaction, or introduce an external workflow/payment
@@ -167,8 +167,151 @@ success.
 way to protect inventory and retry behavior in the current stack. External
 payments, email, outbox, and frontend notification workflows are outside scope.
 
-**Consequences:** Replaying the same key and cart returns the existing order.
-Reusing the same key for a different checkout returns `IdempotencyConflictError`.
-A different key for an already checked-out cart returns `CartNotOpenError`.
-Supplying a coupon code currently returns `CouponNotSupportedError`; coupon
-generation/redemption will be implemented after orders.
+**Consequences:** Replaying the same key, cart, and coupon returns the existing
+order. Reusing the same key with a different cart or coupon returns
+`IdempotencyConflictError`. A different key for an already-checked-out cart returns
+`CartNotOpenError`.
+
+## Decision: Global, admin-issued, explicitly redeemed coupons
+
+**Context:** The requirements define Nth-order rewards, admin generation, optional
+checkout redemption, and single use, but leave historical counting, ownership,
+expiration, configuration changes, and distribution unspecified.
+
+**Options considered:** Assign rewards to the customer who placed each Nth order;
+automatically apply a discount; expose a shared pool of admin-generated coupons; or
+add claim, notification, and expiration workflows.
+
+**Choice:** Count all confirmed orders globally, including historical orders. The
+number of earned reward slots is the high-water mark of `floor(orderCount / N)`.
+Lowering N can make additional slots eligible immediately; raising or toggling N
+never revokes or duplicates earned slots. Each milestone snapshots the configured X
+when earned. An admin explicitly generates one coupon for a selected eligible
+milestone. Authenticated customers can list issued, unredeemed coupons and explicitly
+submit one at checkout. Coupons are shared, single-use, and do not expire.
+
+**Why:** This is the smallest coherent policy that satisfies historical eligibility,
+admin-controlled generation, customer discovery, and optional redemption without
+inventing customer assignment or notification requirements. Durable milestones make
+configuration updates repeat-safe and preserve promises already earned.
+
+**Consequences:** Listing does not reserve a coupon, so two customers may see the same
+code and only one can redeem it. The loser receives `CouponRedeemedError`; checkout
+does not silently continue at full price. Configuration updates use a version token
+to prevent lost admin updates. Changing X affects only newly earned milestones.
+
+## Decision: Serialize reward accounting in the checkout transaction
+
+**Context:** A failed checkout must not consume a coupon, concurrent checkout must not
+redeem one coupon twice, and threshold-crossing orders must not create duplicate
+milestones.
+
+**Options considered:** In-memory counters and locks, separate coupon-consumption
+requests, asynchronous reward processing, or one PostgreSQL transaction with durable
+locks and constraints.
+
+**Choice:** Lock the singleton coupon configuration row before cart, product, and
+coupon rows. Within the same transaction, reconcile historical order counts, validate
+and lock the selected coupon, snapshot its terms on the order, decrement inventory,
+close the cart, and reconcile the newly committed order's milestone. A unique
+`orders.coupon_id` index is the final single-redemption safeguard.
+
+**Why:** Rollback restores coupon availability, inventory, cart state, and reward
+progress together. Database locks and uniqueness work across multiple application
+instances, unlike process-local state. Discount calculation uses
+`floor(subtotalCents * X / 100)` with integer arithmetic, so totals remain
+deterministic and nonnegative.
+
+**Consequences:** Reward accounting serializes a short portion of all checkouts on one
+row. That is proportionate to this assignment but would become a throughput hotspot at
+large scale; a production evolution could use an ordered event ledger or partitioned
+counter while retaining unique milestone and redemption constraints.
+
+## System invariants
+
+- A cart produces at most one order and becomes immutable after checkout.
+- Inventory never becomes negative; checkout locks products in deterministic order.
+- An idempotency key and request fingerprint produce at most one customer order.
+- Order item, price, coupon, and total snapshots remain explainable after catalog or
+	coupon configuration changes.
+- Each reward milestone produces at most one coupon, and each coupon appears on at
+	most one confirmed order.
+- Failed checkout changes no inventory, cart, coupon, order, or reward state.
+- Money uses integer cents; percentage discounts round down and never exceed subtotal.
+
+## Decision: Explicit API error contracts
+
+**Context:** Clients need to distinguish validation, authorization, inventory,
+idempotency, cart-state, and coupon failures without parsing database errors.
+
+**Options considered:** Return one generic client error, expose PostgreSQL errors, or
+map domain failures to named HTTP errors.
+
+**Choice:** Validate public identifiers and bodies before querying, and return named
+errors with appropriate 4xx status codes. Unexpected failures use the central 500
+handler. Explicit coupon input is never silently ignored or converted to full price.
+
+**Why:** Stable names such as `CouponRedeemedError`, `IdempotencyConflictError`, and
+`InsufficientInventoryError` let clients make safe retry and correction decisions.
+
+**Consequences:** New domain failures require deliberate status/name choices and API
+documentation. Internal database details remain hidden.
+
+## Implemented and deferred
+
+Implemented: JWT/RBAC, UUID products, live-price carts, transactional checkout,
+immutable orders, customer-scoped idempotency, configurable historical coupon rewards,
+admin issuance, customer discovery, and concurrency-safe redemption.
+
+Deferred: real payments, email/notifications, coupon ownership/expiry, frontend,
+automatic deadlock retries, migration-history tooling, Docker, and production-scale
+reward/report aggregation.
+
+## Decision: One-snapshot, receipt-based administration report
+
+**Context:** The administrative summary must reconcile product quantities, revenue,
+discounts, coupons, and confirmed orders, remain read-only, and behave coherently while
+checkout or coupon issuance commits concurrently.
+
+**Options considered:** Run separate repository queries in a transaction; maintain
+mutable reporting counters; use a materialized view; or aggregate all fields in one
+PostgreSQL statement.
+
+**Choice:** `GET /api/admin/report` runs one CTE-based read-only SQL statement. Confirmed
+order totals and order-item snapshots are authoritative. Coupon rows are generated;
+those referenced by confirmed orders are redeemed, and the remainder are available.
+Product quantities group by stable UUID and use the latest successful receipt snapshot
+for the display name. Aggregates are returned as decimal strings.
+
+**Why:** One statement receives one MVCC snapshot under PostgreSQL `READ COMMITTED`, so
+the report sees a concurrent commit wholly before or after it rather than mixing states.
+Receipt totals reconcile directly with the order API, and string serialization avoids
+JavaScript safe-integer loss for unbounded sums and counts.
+
+**Consequences:** The endpoint is all-time and unfiltered; date-window coupon semantics
+are intentionally avoided. It scans historical receipts and adds no indexes because
+that is proportionate to the assignment dataset. At production scale, move the same
+invariants to an asynchronously maintained reporting projection or replica after
+measuring query cost.
+
+## AI-assisted development
+
+AI tools were used to inspect code, challenge transaction ordering, draft narrow
+changes, and identify high-risk flow tests. Generated suggestions were reviewed rather
+than accepted blindly. One material correction was rejecting an earlier proposal to
+start a new N-order interval after configuration changes: historical orders now count
+immediately, while a durable high-water mark prevents configuration toggles from
+revoking or duplicating earned rewards. Another correction was keeping idempotency keys
+client-generated instead of adding a server endpoint that would add latency and weaken
+retry identity.
+
+## If given another two hours
+
+First, add fault injection around the post-coupon-lock portion of checkout to prove
+rollback at each database write. Next, exercise checkout/config races repeatedly and
+measure contention on the singleton reward-state row. Finally, replace the plain SQL
+runner with tracked forward-only migrations and add production-style deadlock retry
+telemetry.
+
+Approximate time spent: within the assignment's requested 4–6 hour implementation
+timebox, excluding exploratory discussion and review.

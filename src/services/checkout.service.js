@@ -2,6 +2,13 @@ const crypto = require('crypto');
 
 const { withTransaction, execute } = require('../db/pool');
 const { createHttpError } = require('../errors/http-errors');
+const { validateObject, normalizeCouponCode, parsePositiveBigint } = require('../utils/coupon-validation');
+const {
+  lockCouponState,
+  reconcileCouponMilestones,
+  lockCouponForCheckout,
+  calculateCouponDiscount,
+} = require('./coupon.service');
 const {
   lockCartRowById,
   listRawCartItems,
@@ -23,25 +30,16 @@ function normalizeIdempotencyKey(value) {
   return value.trim();
 }
 
-function buildFingerprint({ cartId }) {
+function buildFingerprint({ cartId, couponCode }) {
   return crypto
     .createHash('sha256')
-    .update(JSON.stringify({ cartId: String(cartId), couponCode: null }))
+    .update(JSON.stringify({ cartId: String(cartId), couponCode: normalizeCouponCode(couponCode) }))
     .digest('hex');
 }
 
 function validateCheckoutBody(body = {}) {
-  const allowedFields = new Set(['couponCode']);
-  const keys = Object.keys(body);
-  const unknownFields = keys.filter((key) => !allowedFields.has(key));
-
-  if (unknownFields.length > 0) {
-    throw createHttpError(400, 'ValidationError', `Unknown checkout fields: ${unknownFields.join(', ')}`);
-  }
-
-  if (Object.hasOwn(body, 'couponCode')) {
-    throw createHttpError(400, 'CouponNotSupportedError', 'Coupon redemption will be implemented after orders');
-  }
+  validateObject(body, ['couponCode'], 'checkout');
+  return { couponCode: normalizeCouponCode(body.couponCode) };
 }
 
 function toSafeNumber(value, fieldName) {
@@ -124,9 +122,10 @@ async function decrementInventory(db, orderItems) {
 }
 
 async function checkoutCart({ customerId, cartId, idempotencyKey, body }) {
-  validateCheckoutBody(body);
+  const { couponCode } = validateCheckoutBody(body);
+  parsePositiveBigint(cartId, 'cartId');
   const normalizedKey = normalizeIdempotencyKey(idempotencyKey);
-  const requestFingerprint = buildFingerprint({ cartId });
+  const requestFingerprint = buildFingerprint({ cartId, couponCode });
 
   return withTransaction(async (db) => {
     await lockIdempotencyKey(db, customerId, normalizedKey);
@@ -143,6 +142,11 @@ async function checkoutCart({ customerId, cartId, idempotencyKey, body }) {
         replayed: true,
       };
     }
+
+    // Replays return before coupon validation. All new checkouts serialize on
+    // reward state before acquiring cart/product/coupon locks.
+    let rewardState = await lockCouponState(db);
+    rewardState = await reconcileCouponMilestones(db, rewardState);
 
     const cart = await lockCartRowById(cartId, db);
 
@@ -172,7 +176,8 @@ async function checkoutCart({ customerId, cartId, idempotencyKey, body }) {
 
     const productsById = await lockProductsForCheckout(db, cartItems);
     const { orderItems, subtotalCents } = buildOrderItems(cartItems, productsById);
-    const discountCents = 0;
+    const coupon = await lockCouponForCheckout(db, couponCode);
+    const discountCents = coupon ? calculateCouponDiscount(subtotalCents, coupon.discountPercent) : 0;
     const totalCents = subtotalCents - discountCents;
 
     await decrementInventory(db, orderItems);
@@ -185,6 +190,9 @@ async function checkoutCart({ customerId, cartId, idempotencyKey, body }) {
       subtotalCents,
       discountCents,
       totalCents,
+      couponId: coupon?.id ?? null,
+      couponCode: coupon?.code ?? null,
+      couponDiscountPercent: coupon?.discountPercent ?? null,
       items: orderItems,
     }, db);
 
@@ -196,8 +204,12 @@ async function checkoutCart({ customerId, cartId, idempotencyKey, body }) {
       [cart.id],
     );
 
+    // Includes this order and earns the threshold-crossing reward atomically
+    // with redemption (orders.coupon_id), stock, receipt, and cart closure.
+    await reconcileCouponMilestones(db, rewardState);
+
     return { order, replayed: false };
   });
 }
 
-module.exports = { checkoutCart };
+module.exports = { checkoutCart, buildFingerprint, validateCheckoutBody };
