@@ -3,7 +3,10 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 
 const { authenticateJwt } = require('../middleware/auth.middleware');
-const { findAuthUserByEmail, toPublicUser } = require('../data/auth-users');
+const {
+  findAuthUserByEmail,
+  toPublicUser,
+} = require('../repositories/auth-users.repository');
 
 const router = express.Router();
 
@@ -17,7 +20,7 @@ router.post('/login', async (req, res) => {
     });
   }
 
-  const user = findAuthUserByEmail(email);
+  const user = await findAuthUserByEmail(email);
 
   if (!user) {
     return res.status(401).json({
