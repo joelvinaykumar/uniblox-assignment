@@ -13,16 +13,13 @@ const {
   adjustInventory,
 } = require('../repositories/products.repository');
 const { parseUuid } = require('../utils/identifiers');
+const {
+  validateInventoryAdjustment,
+  validateNewProduct,
+  validateProductPatch,
+} = require('../utils/product-validation');
 
 const router = express.Router();
-
-function isNonEmptyString(value) {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-function isNonNegativeInteger(value) {
-  return Number.isInteger(value) && value >= 0;
-}
 
 const requireProductRead = requirePermission('product:read');
 const requireProductWrite = requirePermission('product:write');
@@ -69,50 +66,7 @@ router.get('/:id', authenticateJwt, requireProductRead, async (req, res, next) =
 // Requires product writes and inventory adjustment because creation initializes stock
 router.post('/', authenticateJwt, requireProductWriteAndInventoryAdjust, async (req, res, next) => {
   try {
-    const { name, unitPriceCents, availableInventory, metadata, isActive } = req.body;
-
-    if (!isNonEmptyString(name)) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'name is required and must be a non-empty string',
-      });
-    }
-
-    if (!isNonNegativeInteger(unitPriceCents)) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'unitPriceCents is required and must be a non-negative integer',
-      });
-    }
-
-    if (!isNonNegativeInteger(availableInventory)) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'availableInventory is required and must be a non-negative integer',
-      });
-    }
-
-    if (metadata !== undefined && (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata))) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'metadata must be an object when provided',
-      });
-    }
-
-    if (isActive !== undefined && typeof isActive !== 'boolean') {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'isActive must be a boolean when provided',
-      });
-    }
-
-    const product = await createProduct({
-      name: name.trim(),
-      unitPriceCents,
-      availableInventory,
-      metadata,
-      isActive,
-    });
+    const product = await createProduct(validateNewProduct(req.body));
 
     return res.status(201).json({ product });
   } catch (error) {
@@ -123,68 +77,8 @@ router.post('/', authenticateJwt, requireProductWriteAndInventoryAdjust, async (
 // Catalog updates require product writes; stock replacement also requires inventory adjustment
 router.patch('/:id', authenticateJwt, requireProductPatchPermissions, async (req, res, next) => {
   try {
-    const { name, unitPriceCents, availableInventory, metadata, isActive } = req.body;
-    const fields = {};
-
-    if (name !== undefined) {
-      if (!isNonEmptyString(name)) {
-        return res.status(400).json({
-          error: 'ValidationError',
-          message: 'name must be a non-empty string',
-        });
-      }
-      fields.name = name.trim();
-    }
-
-    if (unitPriceCents !== undefined) {
-      if (!isNonNegativeInteger(unitPriceCents)) {
-        return res.status(400).json({
-          error: 'ValidationError',
-          message: 'unitPriceCents must be a non-negative integer',
-        });
-      }
-      fields.unitPriceCents = unitPriceCents;
-    }
-
-    if (availableInventory !== undefined) {
-      if (!isNonNegativeInteger(availableInventory)) {
-        return res.status(400).json({
-          error: 'ValidationError',
-          message: 'availableInventory must be a non-negative integer',
-        });
-      }
-      fields.availableInventory = availableInventory;
-    }
-
-    if (metadata !== undefined) {
-      if (typeof metadata !== 'object' || metadata === null || Array.isArray(metadata)) {
-        return res.status(400).json({
-          error: 'ValidationError',
-          message: 'metadata must be an object',
-        });
-      }
-      fields.metadata = metadata;
-    }
-
-    if (isActive !== undefined) {
-      if (typeof isActive !== 'boolean') {
-        return res.status(400).json({
-          error: 'ValidationError',
-          message: 'isActive must be a boolean',
-        });
-      }
-      fields.isActive = isActive;
-    }
-
-    if (Object.keys(fields).length === 0) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'At least one updatable field is required',
-      });
-    }
-
     const productId = parseUuid(req.params.id, 'productId');
-    const product = await updateProduct(productId, fields);
+    const product = await updateProduct(productId, validateProductPatch(req.body));
 
     if (!product) {
       return res.status(404).json({
@@ -202,15 +96,7 @@ router.patch('/:id', authenticateJwt, requireProductPatchPermissions, async (req
 // Requires inventory adjustment; reserved for admin restock, not checkout
 router.post('/:id/inventory-adjustments', authenticateJwt, requireInventoryAdjust, async (req, res, next) => {
   try {
-    const { delta } = req.body;
-
-    if (!Number.isInteger(delta) || delta === 0) {
-      return res.status(400).json({
-        error: 'ValidationError',
-        message: 'delta is required and must be a non-zero integer',
-      });
-    }
-
+    const delta = validateInventoryAdjustment(req.body);
     const productId = parseUuid(req.params.id, 'productId');
     const existing = await getProductById(productId);
 

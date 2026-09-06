@@ -1,107 +1,20 @@
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
-const { URL } = require('node:url');
-
-require('dotenv').config();
-
-const { Client } = require('pg');
-
-function withSearchPath(connectionString, schema) {
-  const url = new URL(connectionString);
-  url.searchParams.set('options', `-c search_path=${schema}`);
-  return url.toString();
-}
-
-async function prepareDatabase(baseUrl, schema) {
-  const admin = new Client({ connectionString: baseUrl });
-  await admin.connect();
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  await admin.end();
-
-  const testUrl = withSearchPath(baseUrl, schema);
-  const client = new Client({ connectionString: testUrl });
-  await client.connect();
-  const sqlDir = path.join(__dirname, '..', 'sql');
-  for (const file of fs.readdirSync(sqlDir).filter((name) => name.endsWith('.sql')).sort()) {
-    await client.query(fs.readFileSync(path.join(sqlDir, file), 'utf8'));
-  }
-  await client.end();
-  return testUrl;
-}
-
-async function dropSchema(baseUrl, schema) {
-  const client = new Client({ connectionString: baseUrl });
-  await client.connect();
-  await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-  await client.end();
-}
-
-async function withServer(app, callback) {
-  const server = app.listen(0);
-  try {
-    await callback(`http://127.0.0.1:${server.address().port}`);
-  } finally {
-    await new Promise((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
-}
-
-async function request(baseUrl, pathname, { token, method = 'GET', body, headers = {} } = {}) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...headers,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  return { response, body: await response.json() };
-}
-
-async function login(baseUrl, email, password) {
-  const result = await request(baseUrl, '/api/auth/login', {
-    method: 'POST',
-    body: { email, password },
-  });
-  assert.equal(result.response.status, 200);
-  return result.body.token;
-}
-
-async function createCart(baseUrl, token, productId) {
-  const created = await request(baseUrl, '/api/carts', { token, method: 'POST' });
-  assert.ok([200, 201].includes(created.response.status));
-  const cartId = created.body.cart.id;
-  const added = await request(baseUrl, `/api/carts/${cartId}/items`, {
-    token,
-    method: 'POST',
-    body: { productId, quantity: 1 },
-  });
-  assert.equal(added.response.status, 200);
-  return cartId;
-}
+const {
+  createCartWithProduct,
+  loginAsAdmin,
+  loginAsCustomer,
+  request,
+  setupIntegrationTest,
+} = require('../test-support/integration-harness');
 
 test('admin report is authorized, repeatable, and reconciles orders and coupons', { timeout: 30_000 }, async (t) => {
-  if (!process.env.DATABASE_URL || !process.env.JWT_SECRET) {
-    t.skip('DATABASE_URL and JWT_SECRET are required for the report integration flow');
-    return;
-  }
+  const context = await setupIntegrationTest(t, 'report_test');
+  if (!context) return;
 
-  const baseDatabaseUrl = process.env.DATABASE_URL;
-  const schema = `report_test_${crypto.randomBytes(8).toString('hex')}`;
-  process.env.DATABASE_URL = await prepareDatabase(baseDatabaseUrl, schema);
-
-  const app = require('../src/app');
-  const { closePool } = require('../src/db/pool');
-
-  try {
-    await withServer(app, async (baseUrl) => {
-      const adminToken = await login(baseUrl, 'admin@example.com', 'admin123');
-      const customerToken = await login(baseUrl, 'customer@example.com', 'customer123');
+  const { baseUrl } = context;
+  const adminToken = await loginAsAdmin(baseUrl);
+  const customerToken = await loginAsCustomer(baseUrl);
 
       assert.equal((await request(baseUrl, '/api/admin/report')).response.status, 401);
       assert.equal((await request(baseUrl, '/api/admin/report', { token: customerToken })).response.status, 403);
@@ -123,7 +36,7 @@ test('admin report is authorized, repeatable, and reconciles orders and coupons'
       const product = products.body.products.find((item) => item.availableInventory >= 2);
       assert.ok(product);
 
-      const firstCart = await createCart(baseUrl, customerToken, product.id);
+      const firstCart = await createCartWithProduct(baseUrl, customerToken, product.id);
       const firstOrder = await request(baseUrl, `/api/carts/${firstCart}/checkout`, {
         token: customerToken,
         method: 'POST',
@@ -150,7 +63,7 @@ test('admin report is authorized, repeatable, and reconciles orders and coupons'
       });
       assert.equal(issued.response.status, 201);
 
-      const secondCart = await createCart(baseUrl, customerToken, product.id);
+      const secondCart = await createCartWithProduct(baseUrl, customerToken, product.id);
       const secondOrder = await request(baseUrl, `/api/carts/${secondCart}/checkout`, {
         token: customerToken,
         method: 'POST',
@@ -192,10 +105,4 @@ test('admin report is authorized, repeatable, and reconciles orders and coupons'
 
       const repeatedReport = await request(baseUrl, '/api/admin/report', { token: adminToken });
       assert.deepEqual(repeatedReport.body, report.body);
-    });
-  } finally {
-    await closePool();
-    process.env.DATABASE_URL = baseDatabaseUrl;
-    await dropSchema(baseDatabaseUrl, schema);
-  }
 });

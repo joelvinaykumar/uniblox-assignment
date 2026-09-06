@@ -10,9 +10,22 @@ Starter Node.js + Express.js backend.
 - `npm run db:reset` - destructively rebuild the local development schema
 - `npm run lint` - run ESLint
 - `npm test` - run Node's built-in test runner
+- `npm run test:integration` - require database configuration and run all role and business flows
 
-The coupon flow test creates and drops an isolated PostgreSQL schema. It requires
-`DATABASE_URL` and `JWT_SECRET`; without them, that integration flow is skipped.
+The customer, administrator, coupon, and reporting flows each create and drop an
+isolated PostgreSQL schema. The default test command skips them when `DATABASE_URL`
+or `JWT_SECRET` is absent. `npm run test:integration` instead fails fast so CI and
+submission checks cannot silently omit the core business flows.
+
+The integration suites are organized by behavior:
+
+- customer flow: authentication, product discovery, cart item lifecycle, live
+  pricing, ownership, retry-safe checkout, order access, and competing inventory;
+- administrator flow: authorization boundaries, catalog and inventory management,
+  cross-customer order access, coupon generation, and reconciled reporting;
+- coupon flow: historical milestones, concurrent issuance/redemption, idempotency,
+  and failed-checkout rollback; and
+- reporting flow: authorization, accounting reconciliation, and repeatable reads.
 
 ## Database
 
@@ -25,8 +38,9 @@ Setup:
 2. Set `DATABASE_URL` in `.env`.
 3. Run `npm run db:setup` to create and seed auth users, products, carts, orders, and coupon configuration.
 
-The server validates `DATABASE_URL`, `JWT_SECRET`, database connectivity, and
-the presence of seeded users at startup, and fails fast if any check fails.
+The server validates `DATABASE_URL`, `JWT_SECRET`, database connectivity, seeded
+users, and the required coupon schema/configuration at startup, and fails fast if
+any check fails.
 
 ## API
 
@@ -121,3 +135,9 @@ JWT_SECRET=replace-with-a-long-random-secret
 JWT_EXPIRES_IN=1h
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/uniblox_assignment
 ```
+
+## Submission notes
+
+Approximate implementation time: **6 hours**. Real payment processing, frontend,
+notifications, coupon expiry/ownership, Docker, tracked migration tooling, and
+production-scale reporting projections are intentionally deferred.

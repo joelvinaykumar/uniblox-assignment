@@ -50,9 +50,14 @@ app.use((req, res) => {
 app.use((err, req, res, _next) => {
   console.error(err);
 
-  res.status(err.status || 500).json({
-    error: err.name || 'InternalServerError',
-    message: err.message || 'Something went wrong',
+  const isHttpError = Number.isInteger(err.status)
+    && err.status >= 400
+    && err.status <= 599;
+  const status = isHttpError ? err.status : 500;
+
+  res.status(status).json({
+    error: isHttpError ? err.name : 'InternalServerError',
+    message: isHttpError ? err.message : 'An unexpected error occurred',
   });
 });
 

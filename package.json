@@ -9,7 +9,8 @@
     "db:setup": "node scripts/run-sql.js",
     "db:reset": "node scripts/reset-db.js && node scripts/run-sql.js",
     "lint": "eslint .",
-    "test": "node --test"
+    "test": "node --test",
+    "test:integration": "node scripts/require-integration-env.js && node --test test/admin-flow.test.js test/coupon-flow.test.js test/customer-flow.test.js test/report-flow.test.js"
   },
   "keywords": [
     "node",

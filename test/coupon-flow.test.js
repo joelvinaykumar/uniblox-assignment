@@ -1,122 +1,29 @@
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
-const { URL } = require('node:url');
-
-require('dotenv').config();
-
-const jwt = require('jsonwebtoken');
-const { Client } = require('pg');
-
-function withSearchPath(connectionString, schema) {
-  const url = new URL(connectionString);
-  url.searchParams.set('options', `-c search_path=${schema}`);
-  return url.toString();
-}
-
-async function prepareDatabase(baseUrl, schema) {
-  const admin = new Client({ connectionString: baseUrl });
-  await admin.connect();
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  await admin.end();
-
-  const testUrl = withSearchPath(baseUrl, schema);
-  const client = new Client({ connectionString: testUrl });
-  await client.connect();
-
-  const sqlDir = path.join(__dirname, '..', 'sql');
-  for (const file of fs.readdirSync(sqlDir).filter((name) => name.endsWith('.sql')).sort()) {
-    await client.query(fs.readFileSync(path.join(sqlDir, file), 'utf8'));
-  }
-
-  await client.query(
-    `INSERT INTO auth_users (id, name, email, role, password_hash)
-     SELECT 'usr_customer_two', 'Second Customer', 'customer2@example.com', 'customer', password_hash
-     FROM auth_users WHERE id = 'usr_customer_demo'`,
-  );
-  await client.end();
-  return testUrl;
-}
-
-async function dropDatabaseSchema(baseUrl, schema) {
-  const client = new Client({ connectionString: baseUrl });
-  await client.connect();
-  await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
-  await client.end();
-}
-
-async function withServer(app, callback) {
-  const server = app.listen(0);
-
-  try {
-    const { port } = server.address();
-    await callback(`http://127.0.0.1:${port}`);
-  } finally {
-    await new Promise((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-  }
-}
-
-async function request(baseUrl, pathname, { token, method = 'GET', body, headers = {} } = {}) {
-  const response = await fetch(`${baseUrl}${pathname}`, {
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...headers,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  return { response, body: await response.json() };
-}
-
-async function login(baseUrl, email, password) {
-  const result = await request(baseUrl, '/api/auth/login', {
-    method: 'POST',
-    body: { email, password },
-  });
-  assert.equal(result.response.status, 200);
-  return result.body.token;
-}
-
-async function createCartWithProduct(baseUrl, token, productId) {
-  const created = await request(baseUrl, '/api/carts', { token, method: 'POST' });
-  assert.ok([200, 201].includes(created.response.status));
-  const cartId = created.body.cart.id;
-  const added = await request(baseUrl, `/api/carts/${cartId}/items`, {
-    token,
-    method: 'POST',
-    body: { productId, quantity: 1 },
-  });
-  assert.equal(added.response.status, 200);
-  return cartId;
-}
+const {
+  createCartWithProduct,
+  login,
+  loginAsAdmin,
+  loginAsCustomer,
+  request,
+  seedSecondCustomer,
+  setupIntegrationTest,
+} = require('../test-support/integration-harness');
+const {
+  assertCouponStartupValidation,
+  assertFailedCheckoutRollsBack,
+} = require('../test-support/coupon-assertions');
 
 test('coupon flow reconciles history and protects generation and redemption retries', { timeout: 30_000 }, async (t) => {
-  if (!process.env.DATABASE_URL || !process.env.JWT_SECRET) {
-    t.skip('DATABASE_URL and JWT_SECRET are required for the coupon integration flow');
-    return;
-  }
+  const context = await setupIntegrationTest(t, 'coupon_test');
+  if (!context) return;
 
-  const baseDatabaseUrl = process.env.DATABASE_URL;
-  const schema = `coupon_test_${crypto.randomBytes(8).toString('hex')}`;
-  process.env.DATABASE_URL = await prepareDatabase(baseDatabaseUrl, schema);
+  const { baseUrl, databaseUrl } = context;
+  await seedSecondCustomer(databaseUrl);
 
-  const app = require('../src/app');
-  const { closePool } = require('../src/db/pool');
-
-  try {
-    await withServer(app, async (baseUrl) => {
-      const adminToken = await login(baseUrl, 'admin@example.com', 'admin123');
-      const customerToken = await login(baseUrl, 'customer@example.com', 'customer123');
-      const secondCustomerToken = jwt.sign(
-        { sub: 'usr_customer_two', email: 'customer2@example.com', role: 'customer' },
-        process.env.JWT_SECRET,
-        { expiresIn: '10m' },
-      );
+  const adminToken = await loginAsAdmin(baseUrl);
+  const customerToken = await loginAsCustomer(baseUrl);
+  const secondCustomerToken = await login(baseUrl, 'customer2@example.com', 'customer123');
 
       const products = await request(baseUrl, '/api/products', { token: customerToken });
       assert.equal(products.response.status, 200);
@@ -267,18 +174,24 @@ test('coupon flow reconciles history and protects generation and redemption retr
       assert.equal(preservedMilestones.body.milestones[0].id, '2');
       assert.equal(preservedMilestones.body.milestones[0].discountPercent, 10);
 
-      const { validateCouponSchema } = require('../src/db/startup-validation');
-      await validateCouponSchema();
+      const rollbackCouponResult = await request(baseUrl, '/api/admin/coupons', {
+        token: adminToken,
+        method: 'POST',
+        body: { milestoneId: preservedMilestones.body.milestones[0].id },
+      });
+      assert.equal(rollbackCouponResult.response.status, 201);
+      const rollbackCoupon = rollbackCouponResult.body.coupon;
 
-      const schemaClient = new Client({ connectionString: process.env.DATABASE_URL });
-      await schemaClient.connect();
-      await schemaClient.query('DELETE FROM coupon_config WHERE id = 1');
-      await schemaClient.end();
-      await assert.rejects(validateCouponSchema(), /missing coupon_config singleton row/);
-    });
-  } finally {
-    await closePool();
-    process.env.DATABASE_URL = baseDatabaseUrl;
-    await dropDatabaseSchema(baseDatabaseUrl, schema);
-  }
+      // Force a failure after checkout has locked the coupon and decremented
+      // inventory. PostgreSQL must roll back every effect in the transaction.
+      await assertFailedCheckoutRollsBack({
+        baseUrl,
+        databaseUrl,
+        adminToken,
+        customerAttempt: attempts[loserIndex],
+        productId: product.id,
+        coupon: rollbackCoupon,
+      });
+
+      await assertCouponStartupValidation(databaseUrl);
 });
