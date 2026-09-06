@@ -12,8 +12,8 @@ const {
 
 function mapConfig(row) {
   return {
-    n: row.n,
-    x: row.x,
+    orderThreshold: row.order_threshold,
+    discountPercentage: row.discount_percentage,
     version: String(row.version),
     confirmedOrders: String(row.confirmed_orders),
     earnedMilestones: String(row.earned_slots),
@@ -26,7 +26,7 @@ function mapCoupon(row) {
     id: row.id,
     milestoneId: String(row.milestone_id),
     code: row.code,
-    discountPercent: row.discount_percent,
+    discountPercentage: row.discount_percentage,
     status: row.redeemed_at ? 'redeemed' : 'issued',
     issuedAt: row.issued_at,
     redeemedAt: row.redeemed_at || null,
@@ -49,15 +49,21 @@ async function reconcileCouponMilestones(db, state) {
   const result = await execute(db, "SELECT count(*) AS count FROM orders WHERE status = 'confirmed'");
   const confirmedOrders = BigInt(result.rows[0].count);
   const previousEarned = BigInt(state.earned_slots);
-  const earnedUnderRule = confirmedOrders / BigInt(state.n);
+  const earnedUnderRule = confirmedOrders / BigInt(state.order_threshold);
   const earnedSlots = earnedUnderRule > previousEarned ? earnedUnderRule : previousEarned;
 
   if (earnedSlots > previousEarned) {
     await execute(
       db,
-      `INSERT INTO coupon_milestones (id, n, discount_percent, config_version)
+      `INSERT INTO coupon_milestones (id, order_threshold, discount_percentage, config_version)
        SELECT slot, $3, $4, $5 FROM generate_series($1::bigint, $2::bigint) AS slot`,
-      [(previousEarned + 1n).toString(), earnedSlots.toString(), state.n, state.x, state.version],
+      [
+        (previousEarned + 1n).toString(),
+        earnedSlots.toString(),
+        state.order_threshold,
+        state.discount_percentage,
+        state.version,
+      ],
     );
   }
 
@@ -88,14 +94,16 @@ async function updateCouponConfig(body) {
       throw createHttpError(409, 'CouponConfigVersionLimitError', 'Configuration version limit reached');
     }
 
-    // First freeze any outstanding rewards at the OLD rate, then immediately
-    // earn any additional slots unlocked by the NEW N at the NEW rate.
+    // First freeze outstanding rewards at the previous percentage, then earn
+    // additional slots unlocked by the new threshold at the new percentage.
     await reconcileCouponMilestones(db, state);
     const updated = await execute(
       db,
-      `UPDATE coupon_config SET n = $1, x = $2, version = version + 1, updated_at = now()
+      `UPDATE coupon_config
+       SET order_threshold = $1, discount_percentage = $2,
+           version = version + 1, updated_at = now()
        WHERE id = 1 RETURNING *`,
-      [config.n, config.x],
+      [config.orderThreshold, config.discountPercentage],
     );
     return mapConfig(await reconcileCouponMilestones(db, updated.rows[0]));
   });
@@ -115,8 +123,8 @@ async function listCouponMilestones(options = {}) {
     return {
       milestones: result.rows.map((row) => ({
         id: String(row.id),
-        n: row.n,
-        discountPercent: row.discount_percent,
+        orderThreshold: row.order_threshold,
+        discountPercentage: row.discount_percentage,
         configVersion: String(row.config_version),
         earnedAt: row.earned_at,
         status: 'eligible',
@@ -129,7 +137,7 @@ async function listCouponMilestones(options = {}) {
 async function getIssuedCoupon(db, milestoneId) {
   const result = await execute(
     db,
-    `SELECT c.*, m.discount_percent, o.created_at AS redeemed_at
+    `SELECT c.*, m.discount_percentage, o.created_at AS redeemed_at
      FROM coupons c JOIN coupon_milestones m ON m.id = c.milestone_id
      LEFT JOIN orders o ON o.coupon_id = c.id WHERE c.milestone_id = $1`,
     [milestoneId],
@@ -162,7 +170,7 @@ async function listAvailableCoupons(options = {}) {
   const pagination = parseCouponPagination(options);
   const result = await execute(
     query,
-    `SELECT c.*, m.discount_percent FROM coupons c
+    `SELECT c.*, m.discount_percentage FROM coupons c
      JOIN coupon_milestones m ON m.id = c.milestone_id
      WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.coupon_id = c.id)
      ORDER BY c.issued_at, c.id LIMIT $1 OFFSET $2`,
@@ -179,7 +187,7 @@ async function lockCouponForCheckout(db, couponCode) {
   if (code === null) return null;
   const result = await execute(
     db,
-    `SELECT c.*, m.discount_percent, o.created_at AS redeemed_at
+    `SELECT c.*, m.discount_percentage, o.created_at AS redeemed_at
      FROM coupons c JOIN coupon_milestones m ON m.id = c.milestone_id
      LEFT JOIN orders o ON o.coupon_id = c.id
      WHERE c.code = $1 FOR UPDATE OF c`,
@@ -195,12 +203,13 @@ async function lockCouponForCheckout(db, couponCode) {
   return mapCoupon(coupon);
 }
 
-function calculateCouponDiscount(subtotalCents, discountPercent) {
+function calculateCouponDiscount(subtotalCents, discountPercentage) {
   if (!Number.isSafeInteger(subtotalCents) || subtotalCents < 0
-    || !Number.isInteger(discountPercent) || discountPercent < 1 || discountPercent > 100) {
+    || !Number.isInteger(discountPercentage)
+    || discountPercentage < 1 || discountPercentage > 100) {
     throw createHttpError(400, 'ValidationError', 'Invalid subtotal or coupon discount percentage');
   }
-  return Number(BigInt(subtotalCents) * BigInt(discountPercent) / 100n);
+  return Number(BigInt(subtotalCents) * BigInt(discountPercentage) / 100n);
 }
 
 module.exports = {

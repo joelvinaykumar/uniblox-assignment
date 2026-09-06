@@ -334,7 +334,7 @@ const swaggerSpec = swaggerJsdoc({
             totalCents: { type: 'integer', example: 2598 },
             couponId: { type: 'string', format: 'uuid', nullable: true },
             couponCode: { type: 'string', nullable: true, example: 'CPN-A1B2C3D4' },
-            couponDiscountPercent: { type: 'integer', nullable: true, example: 10 },
+            couponDiscountPercentage: { type: 'integer', nullable: true, example: 10 },
             items: {
               type: 'array',
               items: { $ref: '#/components/schemas/OrderItem' },
@@ -360,8 +360,8 @@ const swaggerSpec = swaggerJsdoc({
         CouponConfig: {
           type: 'object',
           properties: {
-            n: { type: 'integer', minimum: 1, example: 5 },
-            x: { type: 'integer', minimum: 1, maximum: 100, example: 10 },
+            orderThreshold: { type: 'integer', minimum: 1, example: 5 },
+            discountPercentage: { type: 'integer', minimum: 1, maximum: 100, example: 10 },
             version: { type: 'string', example: '1' },
             confirmedOrders: { type: 'string', example: '12' },
             earnedMilestones: { type: 'string', example: '2' },
@@ -371,10 +371,10 @@ const swaggerSpec = swaggerJsdoc({
         UpdateCouponConfigRequest: {
           type: 'object',
           additionalProperties: false,
-          required: ['n', 'x', 'version'],
+          required: ['orderThreshold', 'discountPercentage', 'version'],
           properties: {
-            n: { type: 'integer', minimum: 1, example: 5 },
-            x: { type: 'integer', minimum: 1, maximum: 100, example: 10 },
+            orderThreshold: { type: 'integer', minimum: 1, example: 5 },
+            discountPercentage: { type: 'integer', minimum: 1, maximum: 100, example: 10 },
             version: { type: 'string', example: '1' },
           },
         },
@@ -382,8 +382,8 @@ const swaggerSpec = swaggerJsdoc({
           type: 'object',
           properties: {
             id: { type: 'string', example: '1' },
-            n: { type: 'integer', example: 5 },
-            discountPercent: { type: 'integer', example: 10 },
+            orderThreshold: { type: 'integer', example: 5 },
+            discountPercentage: { type: 'integer', example: 10 },
             configVersion: { type: 'string', example: '1' },
             earnedAt: { type: 'string', format: 'date-time' },
             status: { type: 'string', enum: ['eligible'] },
@@ -395,7 +395,7 @@ const swaggerSpec = swaggerJsdoc({
             id: { type: 'string', format: 'uuid' },
             milestoneId: { type: 'string', example: '1' },
             code: { type: 'string', example: 'CPN-A1B2C3D4' },
-            discountPercent: { type: 'integer', example: 10 },
+            discountPercentage: { type: 'integer', example: 10 },
             status: { type: 'string', enum: ['issued', 'redeemed'] },
             issuedAt: { type: 'string', format: 'date-time' },
             redeemedAt: { type: 'string', format: 'date-time', nullable: true },
@@ -1405,7 +1405,7 @@ const swaggerSpec = swaggerJsdoc({
           },
         },
         put: {
-          summary: 'Update N/X and immediately reconcile rewards (admin only)',
+          summary: 'Update the order threshold and discount percentage (admin only)',
           tags: ['Coupons'],
           security: [{ bearerAuth: [] }],
           requestBody: {
@@ -1428,7 +1428,7 @@ const swaggerSpec = swaggerJsdoc({
                 },
               },
             },
-            400: { description: 'Invalid N, X, or version' },
+            400: { description: 'Invalid order threshold, discount percentage, or version' },
             401: { description: 'Missing, invalid, or expired token' },
             403: { description: 'Missing coupon:config:write permission' },
             409: { description: 'Stale configuration version' },

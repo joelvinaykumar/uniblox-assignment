@@ -57,22 +57,26 @@ in-memory seed keeps authentication unambiguous.
 **Consequences:** A running, seeded PostgreSQL database is now required for login;
 there is no in-memory fallback.
 
-## Decision: Defer Docker setup
+## Decision: Add a development Docker Compose stack
 
 **Context:** Reproducible local setup could be provided via Docker Compose, but
-that adds scope.
+the service must not start before PostgreSQL is ready and its schema is initialized.
 
-**Options considered:** Add Docker Compose now, or rely on a locally installed
-PostgreSQL instance.
+**Options considered:** Rely only on a locally installed PostgreSQL instance, run
+schema setup inside the API entrypoint, use PostgreSQL initialization scripts, or
+use a separate one-shot setup service.
 
-**Choice:** Defer Docker; require a locally available PostgreSQL instance and
-document `DATABASE_URL` and `npm run db:setup`.
+**Choice:** Provide a non-root production Node image and a Compose stack with
+PostgreSQL, a one-shot `database-setup` service, and the API. Health and completion
+conditions order startup, while a named volume preserves database state.
 
-**Why:** It keeps the current scope focused and avoids setup work outside the
-immediate goal.
+**Why:** A separate setup service keeps schema mutation out of normal application
+startup while producing a repeatable evaluator workflow. The existing SQL is
+rerunnable, so restarts remain safe at assignment scale.
 
-**Consequences:** Local setup depends on the developer's PostgreSQL environment.
-Docker Compose can be added later for repeatable evaluator setup.
+**Consequences:** Docker remains optional for developers with local PostgreSQL.
+Compose is intended for local/evaluator use; production deployment would use
+tracked migrations, managed secrets, and a database that is not host-exposed.
 
 ## Decision: Static permission-based RBAC
 
@@ -183,9 +187,10 @@ automatically apply a discount; expose a shared pool of admin-generated coupons;
 add claim, notification, and expiration workflows.
 
 **Choice:** Count all confirmed orders globally, including historical orders. The
-number of earned reward slots is the high-water mark of `floor(orderCount / N)`.
-Lowering N can make additional slots eligible immediately; raising or toggling N
-never revokes or duplicates earned slots. Each milestone snapshots the configured X
+number of earned reward slots is the high-water mark of
+`floor(orderCount / orderThreshold)`. Lowering `orderThreshold` can make additional
+slots eligible immediately; raising or toggling it never revokes or duplicates earned
+slots. Each milestone snapshots the configured `discountPercentage`
 when earned. An admin explicitly generates one coupon for a selected eligible
 milestone. Authenticated customers can list issued, unredeemed coupons and explicitly
 submit one at checkout. Coupons are shared, single-use, and do not expire.
@@ -198,7 +203,8 @@ configuration updates repeat-safe and preserve promises already earned.
 **Consequences:** Listing does not reserve a coupon, so two customers may see the same
 code and only one can redeem it. The loser receives `CouponRedeemedError`; checkout
 does not silently continue at full price. Configuration updates use a version token
-to prevent lost admin updates. Changing X affects only newly earned milestones.
+to prevent lost admin updates. Changing `discountPercentage` affects only newly earned
+milestones.
 
 ## Decision: Serialize reward accounting in the checkout transaction
 
@@ -219,8 +225,8 @@ close the cart, and reconcile the newly committed order's milestone. A unique
 **Why:** Rollback restores coupon availability, inventory, cart state, and reward
 progress together. Database locks and uniqueness work across multiple application
 instances, unlike process-local state. Discount calculation uses
-`floor(subtotalCents * X / 100)` with integer arithmetic, so totals remain
-deterministic and nonnegative.
+`floor(subtotalCents * discountPercentage / 100)` with integer arithmetic, so totals
+remain deterministic and nonnegative.
 
 **Consequences:** Reward accounting serializes a short portion of all checkouts on one
 row. That is proportionate to this assignment but would become a throughput hotspot at
@@ -261,10 +267,11 @@ documentation. Internal database details remain hidden.
 
 Implemented: JWT/RBAC, UUID products, live-price carts, transactional checkout,
 immutable orders, customer-scoped idempotency, configurable historical coupon rewards,
-admin issuance, customer discovery, and concurrency-safe redemption.
+admin issuance, customer discovery, concurrency-safe redemption, and a health-ordered
+Docker Compose stack.
 
 Deferred: real payments, email/notifications, coupon ownership/expiry, frontend,
-automatic deadlock retries, migration-history tooling, Docker, and production-scale
+automatic deadlock retries, migration-history tooling, and production-scale
 reward/report aggregation.
 
 ## Decision: One-snapshot, receipt-based administration report
@@ -299,7 +306,7 @@ measuring query cost.
 AI tools were used to inspect code, challenge transaction ordering, draft narrow
 changes, and identify high-risk flow tests. Generated suggestions were reviewed rather
 than accepted blindly. One material correction was rejecting an earlier proposal to
-start a new N-order interval after configuration changes: historical orders now count
+start a new threshold interval after configuration changes: historical orders now count
 immediately, while a durable high-water mark prevents configuration toggles from
 revoking or duplicating earned rewards. Another correction was keeping idempotency keys
 client-generated instead of adding a server endpoint that would add latency and weaken

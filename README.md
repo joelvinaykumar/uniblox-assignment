@@ -29,8 +29,8 @@ The integration suites are organized by behavior:
 
 ## Database
 
-The service requires a PostgreSQL database. A local PostgreSQL instance is
-expected (Docker setup is intentionally deferred).
+The service requires PostgreSQL. It can use either a local database or the
+containerized database described below.
 
 Setup:
 
@@ -41,6 +41,35 @@ Setup:
 The server validates `DATABASE_URL`, `JWT_SECRET`, database connectivity, seeded
 users, and the required coupon schema/configuration at startup, and fails fast if
 any check fails.
+
+## Docker
+
+Docker Compose runs PostgreSQL, applies the SQL setup through a one-shot service,
+and starts the API only after both steps succeed. Set a non-placeholder
+`JWT_SECRET` in `.env`, then run:
+
+```sh
+docker compose up --build
+```
+
+The API and Swagger UI are available at `http://localhost:3000` and
+`http://localhost:3000/docs`. PostgreSQL is exposed on host port `5433` by default
+to avoid conflicting with a local server; override `POSTGRES_PORT` when needed.
+Compose uses its internal `database` hostname and therefore overrides the local
+`DATABASE_URL` value for containers.
+
+Useful lifecycle commands:
+
+```sh
+docker compose ps
+docker compose logs -f api
+docker compose down
+docker compose down --volumes
+```
+
+The final command also removes the persistent PostgreSQL volume and is the
+container equivalent of a destructive local database reset. Running
+`docker compose up` again reapplies the rerunnable SQL setup automatically.
 
 ## API
 
@@ -64,8 +93,8 @@ any check fails.
 - `POST /api/carts/:id/checkout` - checkout a cart (`order:create`, owner only, requires `Idempotency-Key`)
 - `GET /api/orders` - list orders (customers see their own; admins see all)
 - `GET /api/orders/:id` - get an immutable order receipt (`order:read:own` or `order:read:any`)
-- `GET /api/admin/coupon-config` - read N/X and reconciled reward totals (admin)
-- `PUT /api/admin/coupon-config` - update N/X with optimistic version checking (admin)
+- `GET /api/admin/coupon-config` - read the order threshold, discount percentage, and reconciled reward totals (admin)
+- `PUT /api/admin/coupon-config` - update `orderThreshold` and `discountPercentage` with optimistic version checking (admin)
 - `GET /api/admin/coupon-milestones?status=eligible` - list earned, unissued rewards (admin)
 - `POST /api/admin/coupons` - generate a coupon for `milestoneId` (admin)
 - `GET /api/coupons/available` - list issued, unredeemed shared coupons (customer)
@@ -78,15 +107,15 @@ coupon is explicitly applied, never silently ignored, and is consumed only when 
 order transaction commits. Percentage discounts use integer-cent arithmetic and round
 down to the nearest cent.
 
-Coupon rewards count confirmed orders globally, including historical orders. With
-N = 5 and 12 confirmed orders, two milestones are immediately eligible. The admin
-generates one coupon per milestone; customers discover generated coupons through
+Coupon rewards count confirmed orders globally, including historical orders. With an
+`orderThreshold` of 5 and 12 confirmed orders, two milestones are immediately
+eligible. The admin generates one coupon per milestone; customers discover generated coupons through
 `GET /api/coupons/available` and explicitly choose one at checkout. Coupons are shared,
 single-use, do not expire, and listing one does not reserve it. A competing checkout
 may therefore receive `CouponRedeemedError` after another customer commits first.
 Configuration changes are serialized with checkout. A milestone uses whichever
-configuration owns the database lock when it is earned; changing X never rewrites
-an already-earned milestone. Setup SQL can be rerun after a successful migration,
+configuration owns the database lock when it is earned; changing
+`discountPercentage` never rewrites an already-earned milestone. Setup SQL can be rerun after a successful migration,
 but an incompatible pre-release draft schema requires `npm run db:reset` locally.
 
 The admin report is read-only and unfiltered. It aggregates immutable confirmed-order
@@ -134,10 +163,12 @@ NODE_ENV=development
 JWT_SECRET=replace-with-a-long-random-secret
 JWT_EXPIRES_IN=1h
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/uniblox_assignment
+POSTGRES_PASSWORD=postgres
+POSTGRES_PORT=5433
 ```
 
 ## Submission notes
 
 Approximate implementation time: **6 hours**. Real payment processing, frontend,
-notifications, coupon expiry/ownership, Docker, tracked migration tooling, and
+notifications, coupon expiry/ownership, tracked migration tooling, and
 production-scale reporting projections are intentionally deferred.

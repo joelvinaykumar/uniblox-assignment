@@ -49,7 +49,11 @@ test('admin report is authorized, repeatable, and reconciles orders and coupons'
       const updatedConfig = await request(baseUrl, '/api/admin/coupon-config', {
         token: adminToken,
         method: 'PUT',
-        body: { n: 1, x: 10, version: config.body.config.version },
+        body: {
+          orderThreshold: 1,
+          discountPercentage: 10,
+          version: config.body.config.version,
+        },
       });
       assert.equal(updatedConfig.response.status, 200);
 

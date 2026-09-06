@@ -6,7 +6,7 @@ const REQUIRED_COUPON_TABLES = ['coupon_config', 'coupon_milestones', 'coupons']
 const REQUIRED_ORDER_COUPON_COLUMNS = [
   'coupon_id',
   'coupon_code',
-  'coupon_discount_percent',
+  'coupon_discount_percentage',
 ];
 
 function validateEnv() {

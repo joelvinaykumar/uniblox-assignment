@@ -135,7 +135,11 @@ test('administrator API flows', { timeout: 30_000 }, async (t) => {
     const configured = await request(baseUrl, '/api/admin/coupon-config', {
       token: adminToken,
       method: 'PUT',
-      body: { n: 1, x: 15, version: initialConfig.body.config.version },
+      body: {
+        orderThreshold: 1,
+        discountPercentage: 15,
+        version: initialConfig.body.config.version,
+      },
     });
     assert.equal(configured.response.status, 200);
     assert.equal(configured.body.config.confirmedOrders, '1');
@@ -154,7 +158,7 @@ test('administrator API flows', { timeout: 30_000 }, async (t) => {
     });
     assert.equal(issued.response.status, 201);
     coupon = issued.body.coupon;
-    assert.equal(coupon.discountPercent, 15);
+    assert.equal(coupon.discountPercentage, 15);
 
     const repeatedIssue = await request(baseUrl, '/api/admin/coupons', {
       token: adminToken,

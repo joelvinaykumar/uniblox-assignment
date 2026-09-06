@@ -177,7 +177,9 @@ async function checkoutCart({ customerId, cartId, idempotencyKey, body }) {
     const productsById = await lockProductsForCheckout(db, cartItems);
     const { orderItems, subtotalCents } = buildOrderItems(cartItems, productsById);
     const coupon = await lockCouponForCheckout(db, couponCode);
-    const discountCents = coupon ? calculateCouponDiscount(subtotalCents, coupon.discountPercent) : 0;
+    const discountCents = coupon
+      ? calculateCouponDiscount(subtotalCents, coupon.discountPercentage)
+      : 0;
     const totalCents = subtotalCents - discountCents;
 
     await decrementInventory(db, orderItems);
@@ -192,7 +194,7 @@ async function checkoutCart({ customerId, cartId, idempotencyKey, body }) {
       totalCents,
       couponId: coupon?.id ?? null,
       couponCode: coupon?.code ?? null,
-      couponDiscountPercent: coupon?.discountPercent ?? null,
+      couponDiscountPercentage: coupon?.discountPercentage ?? null,
       items: orderItems,
     }, db);
 

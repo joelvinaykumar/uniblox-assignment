@@ -37,7 +37,7 @@ test('coupon flow reconciles history and protects generation and redemption retr
       });
       assert.equal(customerConfig.response.status, 403);
 
-      // First create a historical successful order while the default N is 5.
+      // First create a historical successful order while the default threshold is 5.
       const historicalCart = await createCartWithProduct(baseUrl, customerToken, product.id);
       const historicalCheckout = await request(baseUrl, `/api/carts/${historicalCart}/checkout`, {
         token: customerToken,
@@ -48,14 +48,20 @@ test('coupon flow reconciles history and protects generation and redemption retr
       assert.equal(historicalCheckout.response.status, 201);
 
       const initialConfig = await request(baseUrl, '/api/admin/coupon-config', { token: adminToken });
+      assert.equal(initialConfig.body.config.orderThreshold, 5);
+      assert.equal(initialConfig.body.config.discountPercentage, 10);
       assert.equal(initialConfig.body.config.confirmedOrders, '1');
       assert.equal(initialConfig.body.config.earnedMilestones, '0');
 
-      // N=1 takes effect immediately and reconciles the existing order.
+      // A threshold of 1 takes effect immediately and reconciles the existing order.
       const configured = await request(baseUrl, '/api/admin/coupon-config', {
         token: adminToken,
         method: 'PUT',
-        body: { n: 1, x: 10, version: initialConfig.body.config.version },
+        body: {
+          orderThreshold: 1,
+          discountPercentage: 10,
+          version: initialConfig.body.config.version,
+        },
       });
       assert.equal(configured.response.status, 200);
       assert.equal(configured.body.config.earnedMilestones, '1');
@@ -63,7 +69,11 @@ test('coupon flow reconciles history and protects generation and redemption retr
       const staleConfig = await request(baseUrl, '/api/admin/coupon-config', {
         token: adminToken,
         method: 'PUT',
-        body: { n: 2, x: 20, version: initialConfig.body.config.version },
+        body: {
+          orderThreshold: 2,
+          discountPercentage: 20,
+          version: initialConfig.body.config.version,
+        },
       });
       assert.equal(staleConfig.response.status, 409);
       assert.equal(staleConfig.body.error, 'CouponConfigVersionConflictError');
@@ -119,6 +129,7 @@ test('coupon flow reconciles history and protects generation and redemption retr
       const loserIndex = 1 - winnerIndex;
       const winner = redemptions[winnerIndex].body.order;
       assert.equal(winner.couponId, coupon.id);
+      assert.equal(winner.couponDiscountPercentage, 10);
       assert.equal(winner.discountCents, Math.floor(winner.subtotalCents * 10 / 100));
       assert.equal(winner.totalCents, winner.subtotalCents - winner.discountCents);
       assert.equal(redemptions[loserIndex].body.error, 'CouponRedeemedError');
@@ -153,7 +164,7 @@ test('coupon flow reconciles history and protects generation and redemption retr
       const unavailable = await request(baseUrl, '/api/coupons/available', { token: customerToken });
       assert.deepEqual(unavailable.body.coupons, []);
 
-      // Raising N never revokes earned slots; X changes do not rewrite them.
+      // Raising the threshold never revokes earned slots; percentage changes do not rewrite them.
       const afterCheckoutConfig = await request(baseUrl, '/api/admin/coupon-config', {
         token: adminToken,
       });
@@ -162,7 +173,11 @@ test('coupon flow reconciles history and protects generation and redemption retr
       const raisedInterval = await request(baseUrl, '/api/admin/coupon-config', {
         token: adminToken,
         method: 'PUT',
-        body: { n: 100, x: 25, version: afterCheckoutConfig.body.config.version },
+        body: {
+          orderThreshold: 100,
+          discountPercentage: 25,
+          version: afterCheckoutConfig.body.config.version,
+        },
       });
       assert.equal(raisedInterval.response.status, 200);
       assert.equal(raisedInterval.body.config.earnedMilestones, '2');
@@ -172,7 +187,7 @@ test('coupon flow reconciles history and protects generation and redemption retr
       });
       assert.equal(preservedMilestones.body.milestones.length, 1);
       assert.equal(preservedMilestones.body.milestones[0].id, '2');
-      assert.equal(preservedMilestones.body.milestones[0].discountPercent, 10);
+      assert.equal(preservedMilestones.body.milestones[0].discountPercentage, 10);
 
       const rollbackCouponResult = await request(baseUrl, '/api/admin/coupons', {
         token: adminToken,

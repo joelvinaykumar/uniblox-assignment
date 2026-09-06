@@ -33,14 +33,20 @@ function parsePositiveBigint(value, fieldName) {
 }
 
 function validateCouponConfig(body) {
-  validateObject(body, ['n', 'x', 'version']);
-  if (!Number.isInteger(body.n) || body.n < 1 || body.n > 2_147_483_647) {
-    throw validationError('n must be an integer between 1 and 2147483647');
+  validateObject(body, ['orderThreshold', 'discountPercentage', 'version']);
+  if (!Number.isInteger(body.orderThreshold)
+    || body.orderThreshold < 1 || body.orderThreshold > 2_147_483_647) {
+    throw validationError('orderThreshold must be an integer between 1 and 2147483647');
   }
-  if (!Number.isInteger(body.x) || body.x < 1 || body.x > 100) {
-    throw validationError('x must be an integer between 1 and 100');
+  if (!Number.isInteger(body.discountPercentage)
+    || body.discountPercentage < 1 || body.discountPercentage > 100) {
+    throw validationError('discountPercentage must be an integer between 1 and 100');
   }
-  return { n: body.n, x: body.x, version: parsePositiveBigint(body.version, 'version') };
+  return {
+    orderThreshold: body.orderThreshold,
+    discountPercentage: body.discountPercentage,
+    version: parsePositiveBigint(body.version, 'version'),
+  };
 }
 
 function parseCouponPagination(query = {}, { milestones = false } = {}) {
