@@ -27,6 +27,10 @@ const swaggerSpec = swaggerJsdoc({
         name: 'Users',
         description: 'Basic user management',
       },
+      {
+        name: 'Products',
+        description: 'Product catalog and inventory (authenticated reads, permission-protected writes)',
+      },
     ],
     components: {
       securitySchemes: {
@@ -143,6 +147,109 @@ const swaggerSpec = swaggerJsdoc({
             message: {
               type: 'string',
               example: 'Name and email are required',
+            },
+          },
+        },
+        Product: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              example: '1',
+            },
+            name: {
+              type: 'string',
+              example: 'Classic Ceramic Mug',
+            },
+            unitPriceCents: {
+              type: 'integer',
+              example: 1299,
+            },
+            availableInventory: {
+              type: 'integer',
+              example: 500,
+            },
+            metadata: {
+              type: 'object',
+              example: { category: 'drinkware', color: 'white' },
+            },
+            isActive: {
+              type: 'boolean',
+              example: true,
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+            updatedAt: {
+              type: 'string',
+              format: 'date-time',
+            },
+          },
+        },
+        CreateProductRequest: {
+          type: 'object',
+          required: ['name', 'unitPriceCents', 'availableInventory'],
+          properties: {
+            name: {
+              type: 'string',
+              example: 'Classic Ceramic Mug',
+            },
+            unitPriceCents: {
+              type: 'integer',
+              minimum: 0,
+              example: 1299,
+            },
+            availableInventory: {
+              type: 'integer',
+              minimum: 0,
+              example: 500,
+            },
+            metadata: {
+              type: 'object',
+              example: { category: 'drinkware', color: 'white' },
+            },
+            isActive: {
+              type: 'boolean',
+              example: true,
+            },
+          },
+        },
+        UpdateProductRequest: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              example: 'Classic Ceramic Mug',
+            },
+            unitPriceCents: {
+              type: 'integer',
+              minimum: 0,
+              example: 1399,
+            },
+            availableInventory: {
+              type: 'integer',
+              minimum: 0,
+              example: 480,
+            },
+            metadata: {
+              type: 'object',
+              example: { category: 'drinkware', color: 'blue' },
+            },
+            isActive: {
+              type: 'boolean',
+              example: true,
+            },
+          },
+        },
+        InventoryAdjustmentRequest: {
+          type: 'object',
+          required: ['delta'],
+          properties: {
+            delta: {
+              type: 'integer',
+              description: 'Non-zero integer to add (positive) or remove (negative) from inventory',
+              example: 50,
             },
           },
         },
@@ -311,6 +418,348 @@ const swaggerSpec = swaggerJsdoc({
             },
             404: {
               description: 'User not found',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/products': {
+        get: {
+          summary: 'List active products (authenticated)',
+          tags: ['Products'],
+          security: [
+            {
+              bearerAuth: [],
+            },
+          ],
+          responses: {
+            200: {
+              description: 'List of active products',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      products: {
+                        type: 'array',
+                        items: {
+                          $ref: '#/components/schemas/Product',
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          summary: 'Create a product (admin only)',
+          tags: ['Products'],
+          security: [
+            {
+              bearerAuth: [],
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/CreateProductRequest',
+                },
+              },
+            },
+          },
+          responses: {
+            201: {
+              description: 'Product created successfully',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      product: {
+                        $ref: '#/components/schemas/Product',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Invalid request body',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            403: {
+              description: 'Missing required permissions: product:write and inventory:adjust',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/products/{id}': {
+        get: {
+          summary: 'Get a product by ID (authenticated)',
+          tags: ['Products'],
+          security: [
+            {
+              bearerAuth: [],
+            },
+          ],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: {
+                type: 'string',
+              },
+              example: '1',
+            },
+          ],
+          responses: {
+            200: {
+              description: 'Product found',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      product: {
+                        $ref: '#/components/schemas/Product',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            404: {
+              description: 'Product not found',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+          },
+        },
+        patch: {
+          summary: 'Update a product (permission protected)',
+          tags: ['Products'],
+          security: [
+            {
+              bearerAuth: [],
+            },
+          ],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: {
+                type: 'string',
+              },
+              example: '1',
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/UpdateProductRequest',
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Product updated successfully',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      product: {
+                        $ref: '#/components/schemas/Product',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Invalid request body',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            403: {
+              description: 'Missing required permissions: product:write, plus inventory:adjust when replacing stock',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            404: {
+              description: 'Product not found',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/api/products/{id}/inventory-adjustments': {
+        post: {
+          summary: 'Adjust product inventory (permission protected)',
+          tags: ['Products'],
+          security: [
+            {
+              bearerAuth: [],
+            },
+          ],
+          parameters: [
+            {
+              name: 'id',
+              in: 'path',
+              required: true,
+              schema: {
+                type: 'string',
+              },
+              example: '1',
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/InventoryAdjustmentRequest',
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: 'Inventory adjusted successfully',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      product: {
+                        $ref: '#/components/schemas/Product',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: 'Invalid delta or would make inventory negative',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            401: {
+              description: 'Missing, invalid, or expired token',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            403: {
+              description: 'Missing required permission: inventory:adjust',
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/ErrorResponse',
+                  },
+                },
+              },
+            },
+            404: {
+              description: 'Product not found',
               content: {
                 'application/json': {
                   schema: {

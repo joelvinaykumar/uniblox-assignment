@@ -73,3 +73,28 @@ immediate goal.
 
 **Consequences:** Local setup depends on the developer's PostgreSQL environment.
 Docker Compose can be added later for repeatable evaluator setup.
+
+## Decision: Static permission-based RBAC
+
+**Context:** Customers and admins have different responsibilities. Customers can
+shop and eventually check out, while admins manage catalog data, inventory,
+coupons, and reporting. Hardcoding role checks in route files would couple route
+authorization to the current two-role model.
+
+**Options considered:** Continue simple role checks in routes, store dynamic
+permissions in PostgreSQL, or use a static in-memory role-to-permission policy.
+
+**Choice:** Use a static in-memory permission policy with explicit role grants,
+and have routes require permissions such as `product:write` or
+`inventory:adjust`. Permissions are derived from the JWT role on each request;
+permissions are not embedded in the token.
+
+**Why:** Static permission lookup is cheap and simple, avoids a database query on
+every authorization check, and keeps routes permission-driven instead of
+role-name-driven. This is enough for the assignment's two-role ecommerce scope
+without overbuilding a configurable admin-permissions system.
+
+**Consequences:** Policy changes require an application restart or deployment.
+User role changes still rely on JWT expiry/reissue. Ownership checks are handled
+by shared middleware using trusted persisted ownership data, and cross-owner
+access requires an explicit `:any` permission.

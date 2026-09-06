@@ -33,10 +33,24 @@ the presence of seeded users at startup, and fails fast if any check fails.
 - `GET /api/health` - health check
 - `POST /api/users` - create a user
 - `GET /api/users/:id` - get a user by ID
+- `GET /api/products` - list active products (customer or admin)
+- `GET /api/products/:id` - get a product by ID (customer or admin)
+- `POST /api/products` - create a product (`product:write` + `inventory:adjust`)
+- `PATCH /api/products/:id` - update a product (`product:write`; stock replacement also requires `inventory:adjust`)
+- `POST /api/products/:id/inventory-adjustments` - add/remove stock (`inventory:adjust`)
 
 ## Authentication
 
 The service uses JWT bearer authentication for API clients. Successful login returns a signed JWT that can be sent in the `Authorization` header as `Bearer <token>`.
+
+Authorization is permission driven. JWTs carry a role, and the service derives permissions from a static in-memory policy on each request. Current role grants are:
+
+| Role | Permissions |
+| --- | --- |
+| Customer | `product:read`, `cart:manage`, `order:create`, `order:read:own` |
+| Admin | `product:read`, `product:write`, `inventory:adjust`, `order:read:any`, `coupon:generate`, `report:read` |
+
+Owned-resource checks are centralized in middleware and must use trusted persisted ownership data, not request-body ownership claims.
 
 Demo credentials:
 
